@@ -22,9 +22,10 @@ Experimental, and rough in places:
 The output has a format number. When an update changes it, the viewer says
 so and the map has to be baked again.
 
-| | |
-|---|---|
-| ![Lanterns and lit windows](docs/ihou-lanterns.webp) | ![Airships](docs/ihou-airships.webp) |
+<p>
+  <img src="docs/ihou-lanterns.webp" alt="Lanterns and lit windows" width="49%">
+  <img src="docs/ihou-airships.webp" alt="Airships" width="49%">
+</p>
 
 Viewed in real time in Chrome.
 
@@ -85,23 +86,9 @@ build/prism iso ~/.minecraft/versions/26.2/26.2.jar \
 ```
 
 draws the world from x, z = -300, -300 to 300, 300 (both corners inside)
-as an isometric PNG on the CPU, in the projection of the 2.5D prism (each
-block's top a 32 x 16 diamond at the default 16 px a block). It uses the
-same mesh and baked light as the viewer, at one time of day: the far
-shadows are worked out for that sun alone, not along its whole arc, the
-near ones come from a shadow map along it, only the faces that show in the
-picture are lit (it is drawn once to find them), and the viewer's
-effects, ripples and wind are left out.
-
-The area is loaded in windows of a region's size, each with the world
-around it, so the light and the shadows falling into the area are the
-world's. The ground is cut open at the area's edge and at `--ymin`; the cut
-is lit flat, so its layers show (as are the sides of chunks never
-generated). The picture is held in memory until it is written, cropped to
-what was drawn: about 4 bytes a pixel of it. A 600 x 600 area takes about
-7 s and 2.6 GB at 4 px a block (11 s and 3.3 GB at 16 px, a gigabyte of
-it the picture), a 120 x 120 one under 2 s at 16 px; much of that is
-loading the world around each window.
+as an isometric PNG on the CPU, with the same mesh and baked light as the
+viewer at one time of day. How it is drawn, its memory use, and how to put
+neighbouring pictures together: [docs/iso.md](docs/iso.md).
 
 | Option | |
 |---|---|
@@ -112,10 +99,6 @@ loading the world around each window.
 | `--bounce-rays n` | Rays the bounced sun is gathered over at each corner, 1-48 (default 16; the bake's 48 is a little smoother and slower) |
 | `--threads n` | Default 16 |
 | `--noshadow` | Baked shadows only, no shadow map |
-
-The output names the picture's corner in projected pixels (`sx = (x - z)
-S`, `sy = (x + z) S / 2 + (320 - y) S + S / 2`, S pixels a block), so
-pictures of neighbouring areas can be put together.
 
 ## Viewing
 
@@ -135,65 +118,8 @@ Apache, GitHub Pages and S3 support these. Python's `http.server` does not:
 the viewer then downloads each region's whole file once, which is fine
 locally but wasteful over the internet.
 
-### In a page of your own
-
-The viewer fills whatever element it is given and follows its size, so it
-can sit in a page like an image or a video:
-
-```html
-<script type="importmap">
-{ "imports": {
-    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
-} }
-</script>
-<div id="world" style="height: 480px"></div>
-<script type="module">
-import { createViewer } from "./js/viewer.js";
-const viewer = createViewer(document.getElementById("world"), { map: "mymap", sun: 100 });
-</script>
-```
-
-`viewer/embed.html` is a complete example. The options are the URL
-parameters below (`cam` and `at` as `[x, y, z]` or `"x,y,z"`), plus:
-
-| Option | Meaning |
-|---|---|
-| `keys` | `"focus"` (default): the keys work once the viewer is clicked or tabbed to; `"page"`: anywhere on the page |
-| `ui` | `false`: start with the controls hidden |
-| `onView(params)` | Called a little after the view stops changing, with its URL parameters |
-| `onReady()` | Called once everything in view has loaded |
-| `onPhoto(canvas)` | Called with a photo in place of downloading it |
-
-`createViewer` returns an object with `setView({ cam, at })`, `setSun(deg)`,
-`setFly(on)`, `setFx(on)`, `setFullscreen(on)`, `photo(scale)`, `view()`,
-`ready`, `destroy()` and `three` (the renderer, scene, camera and controls).
-Several viewers can share a page; each is a WebGL context of its own until
-`destroy()`. The page needs the import map above and the viewer's folder
-(`js/` and `style.css`, which it adds to the page itself).
-
-An `<iframe src="index.html?map=mymap" allow="fullscreen">` works too.
-
-### From another site
-
-The map and the viewer can be on a different site from the page (another
-domain, or a CDN). Then that server must send `Access-Control-Allow-Origin`
-(`*`, or the page's origin) with the map's files: `map.json`, `index.json`,
-`atlas.png` and `tiles.bin`, and with the viewer's `js/` and `style.css` if
-those are elsewhere too. Nothing more is needed: the viewer's Range requests
-are plain `bytes=a-b` ones, which the browser sends without a preflight. For
-example, in nginx:
-
-```nginx
-location /maps/ { add_header Access-Control-Allow-Origin *; }
-```
-
-Without the header the viewer shows "map load failed: ... must send
-Access-Control-Allow-Origin". With the viewer's `js/` on another site, its
-tile workers are started from a small `blob:` module of the page's own, as
-browsers allow only same-site worker scripts. A page with a
-Content-Security-Policy must then allow `worker-src blob:`. The iframe
-needs none of this, since everything in it comes from one site.
+To put the viewer in a page of your own, or serve the map from another
+site, see [docs/embedding.md](docs/embedding.md).
 
 ### Controls
 
@@ -260,36 +186,8 @@ Each region is cut into 64-block tiles at three levels of detail:
 | 1 | No small plants, opaque leaves | Up to 640 blocks away |
 | 2 | 4×1×4-block cells of mean colour | Beyond that |
 
-Per region, `r.<x>.<z>/` holds:
-
-| File | Contents |
-|---|---|
-| `index.json` | The format, the tile list with quad counts, and where each tile is in `tiles.bin` |
-| `atlas.png` | Texture atlas |
-| `tiles.bin` | Every tile of the region |
-
-`tiles.bin` starts with all the coarse tiles in one pack. Then, per tile,
-come the quads only level 0 has, the quads levels 0 and 1 share, and the
-quads only level 1 has. Either level is one run of bytes, which the viewer
-reads with an HTTP Range request. Getting closer downloads only the level 0
-remainder, since the shared part is already there. Each part is gzipped on
-its own. The format is documented where it is written (`tile_payload` and
-`write_tiles` in `src/tiles/tiles.c`) and decoded in `viewer/js/tile.js`.
-
-`map.json` and every `index.json` carry the format number (`"format"`).
-The viewer refuses a map in a format it does not read and asks for a
-rebake.
-
-`map.json` also gives the world's water surface (`"sea"`, the height of
-the top water block that most of its water columns have). The ground mist
-lies on it and the view starts just above it, so a map whose sea is not at
-the game's usual height (y 62) is not buried in mist. A map without it
-(baked before) is taken to be at 62.
-
-Caves are left out, as BlueMap does: unlit spaces below y 55, 7 under the
-usual sea. Where a region's water is lower, the cut follows it down (never
-up), so the closed rooms of a town built on an old superflat world at y 5
-are kept.
+What a bake writes, and how it finds the water level and leaves out caves:
+[docs/format.md](docs/format.md).
 
 Measured on an AMD Ryzen 7 9800X3D (8 cores, 16 threads) under WSL2 with
 15 GB of memory, baking every region of the world with `prism map`:
@@ -311,29 +209,7 @@ The viewer downloads only what it shows: on a 4-region test map, opening
 on an overview took 7–37 MB, depending on the view, and getting closer
 downloads more of what is near.
 
-## Layout
-
-| Path | Contents |
-|---|---|
-| `cli/main.c`, `map.c`, `bake.c`, `iso.c` | The `prism` command: `map` a whole world, `bake` (the default) one region into tiles, `iso` an area into a picture |
-| `cli/skinlist.c` | The skins a world's player heads name, for `scripts/fetch_skins.sh` |
-| `src/prism.h` | What the modules share, grouped by the file that defines it |
-| `src/world/` | `states.c`, `atlas.c`: block states from the jar's models and tags, the texture atlas; `world.c`, `entities.c`: the voxel grid, biomes, light flood fill, banner, head and pot textures; `tint.c`: biome colours from the jar's colormaps and biome JSON; `window.c`: opening the jar once, loading the world window by window |
-| `src/light/` | `light.c`: baked light per corner; `bounce.c`: bounced sunlight |
-| `src/mesh/` | `mesh.c`: blocks to quads at levels 0 and 1; `coarse.c`: level 2 cells |
-| `src/tiles/` | `tiles.c`: tile encoding and writing; `glb.c`: a glTF export of level 0 |
-| `src/iso/` | `isodraw.c`: level 0 drawn on the CPU into an isometric picture, window by window |
-| `scripts/` | `fetch_skins.sh` |
-| `viewer/index.html`, `embed.html` | The viewer as a page; an example of one in a page |
-| `viewer/js/viewer.js` | `createViewer`: the page element, renderer and camera, then each module in turn |
-| `viewer/js/sun.js`, `sky.js`, `air.js` | The sun and moon; the sky dome and stars; haze and light shafts |
-| `viewer/js/materials.js`, `shadows.js` | How the tiles take the light; the live shadow maps |
-| `viewer/js/effects.js`, `frame.js` | Post-processing (FX); drawing a frame |
-| `viewer/js/map.js`, `tile.js`, `tile-worker.js` | Loading tiles by distance; decoding them, in workers |
-| `viewer/js/controls.js`, `lens.js`, `photo.js` | Moving about and fly mode; the camera panel; photos |
-| `viewer/js/glb.js`, `diag.js` | A single region's `region.glb`; `?diag` and `?diag&bench` |
-| `docs/` | The pictures in this README |
-| `libs/` | The C libraries: zip, NBT, region files, chunks, JSON, PNG, block models, canvas, the reader-writer lock (`libs/README.md`) |
+Where things are in the source: [docs/developing.md](docs/developing.md).
 
 ## Limitations
 
