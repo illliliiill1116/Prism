@@ -1,0 +1,36 @@
+<!doctype html>
+<!-- An example of a viewer in a page of its own: a box in an article. The
+     keys work once the viewer has been clicked; the corner button (or the
+     page's own, below) puts it full screen. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>prism embedded</title>
+<script type="importmap">
+{ "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<style>
+  body { margin: 0 auto; max-width: 860px; padding: 24px 16px; font: 16px/1.6 system-ui, sans-serif; color: #222; }
+  #world { height: min(480px, 70vh); border-radius: 8px; overflow: hidden; }
+</style>
+</head>
+<body>
+<h1>Our world</h1>
+<p>Drag to look around, scroll to zoom; click the map first for the keys (WASD, F, V, C…).</p>
+<div id="world"></div>
+<p><button id="full">Full screen</button> <button id="sunset">Sunset</button></p>
+<p>The rest of the page goes on here, and scrolls as usual.</p>
+<script type="module">
+import { createViewer } from "./js/viewer.js";
+const map = new URLSearchParams(location.search).get("map") || "map";
+const viewer = createViewer(document.getElementById("world"), { map, sun: 100 });
+document.getElementById("full").onclick = () => viewer.setFullscreen(true);
+document.getElementById("sunset").onclick = () => viewer.setSun(175);
+window.viewer = viewer;
+</script>
+</body>
+</html>

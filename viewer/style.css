@@ -1,0 +1,73 @@
+/* prism's viewer: everything under .prism, the element createViewer makes */
+.prism { position: relative; width: 100%; height: 100%; overflow: hidden; background: #8fb4e3; outline: none;
+       -webkit-tap-highlight-color: transparent; container-type: size; }
+.prism > canvas { display: block; }
+/* full screen where the browser cannot put an element there (an iPhone) */
+.prism.max { position: fixed; inset: 0; width: auto; height: auto; z-index: 2147483000; }
+/* what went wrong, if loading failed */
+.prism-info { display: none; position: absolute; top: 64px; left: 12px; max-width: calc(100% - 100px); font: 12px/1.4 system-ui, sans-serif;
+            color: #111; background: rgba(255,255,255,.75); padding: 4px 8px; border-radius: 4px; }
+.prism-info.on { display: block; }
+.prism-panel { position: absolute; display: grid; gap: 4px; padding: 6px; border-radius: 8px;
+             background: rgba(255,255,255,.6); user-select: none; -webkit-user-select: none; touch-action: none; }
+.prism-panel button { width: 40px; height: 40px; margin: 0; padding: 0; border: 0; border-radius: 6px; background: rgba(255,255,255,.85);
+                    font: 600 15px system-ui, sans-serif; color: #223; cursor: pointer; touch-action: none;
+                    display: inline-flex; align-items: center; justify-content: center; }
+.prism-panel button.on, .prism-panel button:active { background: #3d6fb8; color: #fff; }
+.prism-pad { left: 12px; bottom: 12px; grid-template-columns: repeat(3, 40px); }
+.prism-zoom { right: 12px; top: 50%; transform: translateY(-50%); justify-items: center; }
+.prism-zoom input { writing-mode: vertical-lr; direction: rtl; height: 220px; width: 28px; margin: 4px 0; }
+.prism-fxp { right: 12px; top: 12px; }
+/* time of day: a clock from midnight to midnight, the bar coloured as the sky */
+.prism-sunp { left: 12px; top: 12px; grid-auto-flow: column; align-items: center; font: 600 13px system-ui, sans-serif; color: #223; }
+.prism-sunbar { -webkit-appearance: none; appearance: none; width: clamp(60px, calc(100cqw - 340px), 200px); height: 10px;
+              margin: 0 4px; border-radius: 5px; cursor: pointer;
+              background: linear-gradient(to right, #1d2442 0%, #2e3c6e 19%, #f2a65f 25%, #a8d0f2 33%, #cbe6ff 50%,
+                                          #a8d0f2 67%, #f0874a 75%, #2e3c6e 81%, #1d2442 100%); }
+.prism-sunbar::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%;
+                                    background: #fff; border: 2px solid #3d6fb8; }
+.prism-sunbar::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 2px solid #3d6fb8; }
+.prism-sunt { width: 44px; text-align: center; font-variant-numeric: tabular-nums; }
+.prism-help { left: 50%; top: 50%; transform: translate(-50%, -50%); display: block; width: min(400px, calc(100cqw - 32px));
+            max-height: calc(100cqh - 32px); overflow: auto; padding: 12px 16px; background: rgba(255,255,255,.94);
+            font: 13px/1.5 system-ui, sans-serif; color: #223; touch-action: auto; user-select: text; -webkit-user-select: text; }
+.prism-help[hidden] { display: none; }
+.prism-help dl { margin: 0; }
+.prism-help dt { font-weight: 600; margin-top: 6px; }
+.prism-help dd { margin: 0 32px 0 0; }
+.prism-help kbd { display: inline-block; min-width: 1.4em; padding: 0 4px; margin: 0 1px; border-radius: 4px; text-align: center;
+                background: #eef1f6; border: 1px solid #c8cfdb; font: 600 12px/1.5 system-ui, sans-serif; }
+.prism-panel .prism-helpx { position: absolute; right: 8px; top: 8px; width: 28px; height: 28px; font-size: 18px; }
+.prism-fxp button { width: 48px; font-size: 13px; }
+.prism-hint { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); pointer-events: none;
+            font: 13px/1.4 system-ui, sans-serif; color: #fff; background: rgba(0,0,0,.55); padding: 4px 10px;
+            border-radius: 4px; opacity: 0; transition: opacity .4s; white-space: nowrap; }
+.prism-hint.on { opacity: 1; transition: none; }
+.prism.fly .prism-zoom { display: none; }
+.prism-camp { right: 80px; top: 12px; width: 270px; grid-template-columns: 64px 1fr 58px; align-items: center;
+            font: 12px system-ui, sans-serif; color: #223; }
+.prism-camp[hidden] { display: none; }
+.prism-camp input { width: 100%; margin: 0; }
+.prism-camp output { text-align: right; font-variant-numeric: tabular-nums; }
+.prism-camp .prism-note { grid-column: 1 / -1; color: #445; font-size: 11px; }
+.prism-camp .prism-row { grid-column: 1 / -1; display: flex; gap: 4px; }
+.prism-camp .prism-row button { flex: 1; width: auto; height: 30px; font-size: 12px; }
+.prism-camp select { border: 0; border-radius: 6px; background: rgba(255,255,255,.85); font: 12px system-ui, sans-serif; }
+.prism.clean .prism-panel { display: none; }
+/* A short viewer (a box in a page, a phone on its side): the buttons in a
+   row, so the zoom bar fits under them, shorter or, very short, gone. */
+@container (max-height: 740px) and (min-width: 480px) {
+  .prism-fxp { grid-auto-flow: column; }
+  .prism-camp { top: 76px; }
+  .prism-zoom input { height: min(220px, calc(100cqh - 270px)); }
+}
+@container (max-height: 380px) and (min-width: 480px) { .prism-zoom input { display: none; } }
+/* short and narrow (a phone upright, the viewer a box in its page): the
+   zoom panel in the bottom corner, under the buttons' column */
+@container (max-height: 740px) and (max-width: 479px) {
+  .prism-zoom { top: auto; bottom: 12px; transform: none; }
+  .prism-zoom input { height: min(220px, calc(100cqh - 380px)); }
+}
+@container (max-height: 490px) and (max-width: 479px) { .prism-zoom input { display: none; } }
+/* narrow: the buttons are a column, so the time of day takes the rest of the top */
+@container (max-width: 479px) { .prism-sunbar { width: clamp(50px, calc(100cqw - 220px), 200px); } }

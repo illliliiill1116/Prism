@@ -1,0 +1,37 @@
+<!doctype html>
+<!-- prism's viewer as a page of its own: see ../README.md for its controls,
+     URL parameters, and how to put one in a page of your own (js/viewer.js). -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>prism</title>
+<link rel="stylesheet" href="style.css" data-prism>
+<style>html, body { margin: 0; height: 100%; overflow: hidden; }</style>
+<script type="importmap">
+{ "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<script type="module">
+import { createViewer, VIEW_KEYS } from "./js/viewer.js";
+/* the address's parameters are the options; the view goes back into it,
+   so a reload or a shared link opens the same place; ?test adds the
+   globals headless tests drive it through */
+const params = Object.fromEntries(new URLSearchParams(location.search));
+createViewer(document.body, {
+    ...params,
+    keys: "page", testHooks: "test" in params,
+    onView(view) {
+        const u = new URL(location.href), p = u.searchParams;
+        for (const k of VIEW_KEYS) if (view.has(k)) p.set(k, view.get(k)); else p.delete(k);
+        u.search = p.toString().replace(/%2C/g, ",");
+        try { history.replaceState(history.state, "", u); } catch {}
+    },
+});
+</script>
+</body>
+</html>
