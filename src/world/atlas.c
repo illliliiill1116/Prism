@@ -49,6 +49,24 @@ uint32_t tex_slot(const canvas_t *t) {
     return nslots - 1;
 }
 
+/* What light through the part u0..u1, v0..v1 (16ths, either way round) of
+ * t keeps, sRGB: a clear texel all of it, any other its own colour. */
+void tex_filt(const canvas_t *t, float u0, float v0, float u1, float v1, float out[3]) {
+    uint32_t w = t->width, h = t->height > t->width ? t->width : t->height;
+    if (u0 > u1) { float k = u0; u0 = u1; u1 = k; }
+    if (v0 > v1) { float k = v0; v0 = v1; v1 = k; }
+    uint32_t x0 = (uint32_t)(u0 / 16 * w), x1 = (uint32_t)ceilf(u1 / 16 * w), y0 = (uint32_t)(v0 / 16 * h), y1 = (uint32_t)ceilf(v1 / 16 * h);
+    x1 = x1 > w ? w : x1 <= x0 ? x0 + 1 : x1;
+    y1 = y1 > h ? h : y1 <= y0 ? y0 + 1 : y1;
+    double f[3] = { 0 }, n = 0;
+    for (uint32_t y = y0; y < y1 && y < h; y++) {
+        const uint8_t *row = canvas_row(t, y);
+        for (uint32_t x = x0; x < x1 && x < w; x++, n++)
+            for (int k = 0; k < 3; k++) f[k] += row[x * 4 + 3] ? row[x * 4 + k] / 255.0 : 1;
+    }
+    for (int k = 0; k < 3; k++) out[k] = n ? (float)(f[k] / n) : 1;
+}
+
 /* tex_slot may realloc slots: always take the index first, never
  * &slots[tex_slot(t)], whose slots can be read before the call moves it. */
 int tex_opaque(const canvas_t *t) {

@@ -321,6 +321,33 @@ static uint32_t intern_named(const nbt_pool_t *pool, const char *name, uint16_t 
                 s->far_occl = !s->occl && !s->up_lit && !flat && !clear && s->shape->element_count;
             }
         }
+        /* A see-through block drawn blended (stained glass, ice, honey)
+         * that does not block light colours the light through it: what
+         * its faces let through (tex_filt, over the part of the texture
+         * each one shows), by their area. A pane's edges show the strip
+         * of its _top texture that is glass, not the clear rest. */
+        if (s->shape && s->shape->element_count && !s->occl && !s->up_lit) {
+            double f[3] = { 0 }, area = 0;
+            int blend = 0;
+            for (uint32_t i = 0; i < s->shape->element_count; i++) {
+                const blockmodel_element_t *e = &s->shape->elements[i];
+                for (int fc = 0; fc < FACE_COUNT; fc++) {
+                    const blockmodel_shape_face_t *fa = &e->faces[fc];
+                    if (!fa->texture) continue;
+                    blend |= slots[tex_slot(fa->texture)].has_partial;
+                    float a = fc < 2 ? (e->x1 - e->x0) * (e->z1 - e->z0) : fc < 4 ? (e->x1 - e->x0) * (e->y1 - e->y0)
+                                                                         : (e->y1 - e->y0) * (e->z1 - e->z0);
+                    float t[3];
+                    tex_filt(fa->texture, fa->u0, fa->v0, fa->u1, fa->v1, t);
+                    for (int c = 0; c < 3; c++) f[c] += a * t[c];
+                    area += a;
+                }
+            }
+            if (blend && area > 0) {
+                s->filters = 1;
+                for (int c = 0; c < 3; c++) s->filt[c] = (float)(f[c] / area);
+            }
+        }
         /* the offset type lives in the game's code, not in the jar's data */
         s->jitter = name_is(bare, "short_grass") || name_is(bare, "fern") ||
                     name_is(bare, "short_dry_grass") || name_is(bare, "tall_dry_grass");

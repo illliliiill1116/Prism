@@ -59,7 +59,7 @@ export function setupMap(app) {
            each showed one's mirror image through the other's clear texels */
         const mats = [mk("OPAQUE", {}), mk("MASK", { alphaTest: 0.5 }),
                       mk("BLEND", { transparent: true, depthWrite: false, side: THREE.DoubleSide }),
-                      mk("WATER", { transparent: true, depthWrite: false, side: THREE.DoubleSide })];
+                      mk("WATER", { transparent: true, side: THREE.DoubleSide })];
         for (const m of mats) {
             if (m.name === "WATER") patchWater(m); else patchLight(m, shadowOn, true);
             if (m.name === "MASK" && MSAA) patchCutout(m, true);
@@ -162,8 +162,16 @@ export function setupMap(app) {
         }
         return out;
     }
-    /* water and glass are drawn over the rest (SplitRenderPass) */
-    function layerOf(o) { if (o.material.name === "WATER" || o.material.name === "BLEND") o.layers.set(LAYER_OVER); }
+    /* Water and glass are drawn over the rest (SplitRenderPass): the water
+     * first, writing its depth, then the glass. Three.js orders see-through
+     * meshes by their origin, which is the region's for every tile, so the
+     * two came in whichever order the meshes were made, and water drawn last
+     * covered ice and glass above it; now glass under water is hidden by it
+     * as it should be. */
+    function layerOf(o) {
+        if (o.material.name === "WATER" || o.material.name === "BLEND") o.layers.set(LAYER_OVER);
+        if (o.material.name === "BLEND") o.renderOrder = 1;
+    }
     function addMeshes(t, lod, meshes) {
         t.lod[lod] = meshes;
         for (const o of meshes) layerOf(o);

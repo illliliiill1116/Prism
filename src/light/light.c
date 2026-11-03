@@ -168,7 +168,38 @@ int ray_free(const float o[3], const float d[3], float maxd, int leaf) {
  * topmost blocker ends nearer than NEAR0. For a leaf face (leaf) the bake
  * keeps every blocker, near ones too, past its LEAF_PASS leaves: the
  * viewer's map would cut a canopy's shade up by the leaves' holes. */
-static float ray_far_vis(const float o[3], const float d[3], float maxd, int leaf) {
+/* 1 if the segment o + t d, t0..t1, crosses the filter st's model (a pane
+ * is a thin slab through its voxel). prism iso empties the grid outside its
+ * area but keeps the bitmaps: a filter gone from the grid lets all through. */
+static int filt_hit(const state_t *st, int x, int y, int z, const float o[3], const float d[3], float t0, float t1) {
+    if (!st->filters) return 0;
+    const blockmodel_shape_t *sh = st->shape;
+    if (sh->full_cube) return 1;
+    const float b[3] = { (float)x, (float)y, (float)z };
+    for (uint32_t i = 0; i < sh->element_count; i++) {
+        const blockmodel_element_t *e = &sh->elements[i];
+        const float lo[3] = { e->x0, e->y0, e->z0 }, hi[3] = { e->x1, e->y1, e->z1 };
+        float a0 = t0, a1 = t1;
+        for (int a = 0; a < 3 && a0 <= a1; a++) {
+            float l = b[a] + lo[a] / 16, h = b[a] + hi[a] / 16;
+            if (fabsf(d[a]) < 1e-7f) {
+                if (o[a] < l || o[a] > h) a1 = -1;
+                continue;
+            }
+            float u = (l - o[a]) / d[a], v = (h - o[a]) / d[a];
+            if (u > v) { float k = u; u = v; v = k; }
+            a0 = fmaxf(a0, u);
+            a1 = fminf(a1, v);
+        }
+        if (a0 <= a1) return 1;
+    }
+    return 0;
+}
+
+/* tr (if not NULL): times what each filter the ray crosses lets through;
+ * set to -1 if the ray meets any blocker, near ones too (the viewer's map
+ * shades those, so what the filters let through then is never seen) */
+static float ray_far_vis(const float o[3], const float d[3], float maxd, int leaf, float tr[3]) {
     int pass = leaf ? LEAF_PASS : 0;
     int ix = (int)floorf(o[0]), iy = (int)floorf(o[1]), iz = (int)floorf(o[2]);
     int step[3]; float tmax[3], tdel[3];
@@ -193,11 +224,17 @@ static float ray_far_vis(const float o[3], const float d[3], float maxd, int lea
         if (iy < 0) return 0;
         int solid = occ_at(ix, iy, iz) && !occ_miss(ix, iy, iz, o, d, t, fminf(fminf(tmax[0], tmax[1]), tmax[2]));
         int o2 = solid || focc_at(ix, iy, iz);
+        if (tr && tr[0] >= 0 && !o2 && gocc_at(ix, iy, iz)) {
+            const state_t *st = &states[grid[gidx(ix, iy, iz)]];
+            if (filt_hit(st, ix, iy, iz, o, d, t, fminf(fminf(tmax[0], tmax[1]), tmax[2])))
+                for (int c = 0; c < 3; c++) tr[c] *= st->filt[c];
+        }
         if (!o2 && !leaf && t >= PLANT_NEAR && pocc_at(ix, iy, iz) && (pl *= PLANT_PASS) < 0.5f) return 0;
         if (o2 && leaf && (o2 = ray_stops(ix, iy, iz, &pass))) return 0;
         if (o2 && t >= (solid ? NEAR1 : THIN_NEAR1)) return 0;
         if (!o2 && inside) { end = t; endthin = thin; }
         if (o2) thin = (inside ? thin : 1) && !solid;
+        if (o2 && tr) tr[0] = -1;
         inside = o2;
         int cell = !o2 && step[1] >= 0 ? hm_skip(ix, iy, iz) : 0;
         float te = cell ? hm_exit(o, d, ix, iz, cell) : 0;
@@ -250,8 +287,9 @@ static float block_flood_at(const float p[3], const float n[3]) {
 }
 
 /* 1 if the segment from o along unit d reaches voxel t (within maxd)
- * without entering an occluding voxel before it. */
-static int ray_to(const float o[3], const float d[3], float maxd, int tx, int ty, int tz) {
+ * without entering an occluding voxel before it; tr times what each
+ * filter on the way lets through. */
+static int ray_to(const float o[3], const float d[3], float maxd, int tx, int ty, int tz, float tr[3]) {
     int ix = (int)floorf(o[0]), iy = (int)floorf(o[1]), iz = (int)floorf(o[2]);
     int step[3]; float tmax[3], tdel[3];
     const int ip[3] = { ix, iy, iz };
@@ -269,7 +307,13 @@ static int ray_to(const float o[3], const float d[3], float maxd, int tx, int ty
         tmax[a] += tdel[a];
         if (ix == tx && iy == ty && iz == tz) return 1;
         if (ix < 0 || iz < 0 || ix >= GW || iz >= GW || iy < 0 || iy >= GH) return 1;
-        if (occ_at(ix, iy, iz) && !occ_miss(ix, iy, iz, o, d, tin, fminf(fminf(tmax[0], tmax[1]), tmax[2]))) return 0;
+        float tout = fminf(fminf(tmax[0], tmax[1]), tmax[2]);
+        if (occ_at(ix, iy, iz) && !occ_miss(ix, iy, iz, o, d, tin, tout)) return 0;
+        if (gocc_at(ix, iy, iz)) {
+            const state_t *st = &states[grid[gidx(ix, iy, iz)]];
+            if (filt_hit(st, ix, iy, iz, o, d, tin, tout))
+                for (int c = 0; c < 3; c++) tr[c] *= st->filt[c];
+        }
     }
 }
 
@@ -281,7 +325,8 @@ static int ray_to(const float o[3], const float d[3], float maxd, int tx, int ty
  * where a light is in sight, its straight-line level, which is more. The
  * game's falls off by steps along the axes, a diamond round each light,
  * so neither it nor its reach may bound what is in sight: that is round.
- * Lights combine as 1 - (1 - a)(1 - b)... */
+ * Lights combine as 1 - (1 - a)(1 - b)..., per channel: a light seen
+ * through stained glass is coloured by it (the fill is not). */
 #define BLOCK_FILL 0.30f
 
 /* where in a light's block the rays to it end: its middle and eight
@@ -296,9 +341,10 @@ static const float BLK_TAP[BLK_TAPS][3] = {
 
 static float lvl_curve(float l) { return l / (4 - 3 * l); }
 
-static float block_light_at(const float p[3], const float n[3]) {
-    if (!blkl) return 0;
-    float flood = block_flood_at(p, n), dark = 1;
+static void block_light_at(const float p[3], const float n[3], float out[3]) {
+    for (int c = 0; c < 3; c++) out[c] = 0;
+    if (!blkl) return;
+    float flood = block_flood_at(p, n), dark[3] = { 1, 1, 1 };
     float o[3] = { p[0] + n[0] * 0.1f, p[1] + n[1] * 0.1f, p[2] + n[2] * 0.1f };
     int c0[3], c1[3];
     for (int a = 0; a < 3; a++) {
@@ -321,24 +367,28 @@ static float block_light_at(const float p[3], const float n[3]) {
                     float ndl = n[0] * d[0] + n[1] * d[1] + n[2] * d[2];
                     if (ndl <= 0) continue;
                     float l = lvl_curve((e->e - dist) / 15) * (0.3f + 0.7f * ndl);
-                    if (l * dark < 0.004f) continue;
+                    if (l * fmaxf(fmaxf(dark[0], dark[1]), dark[2]) < 0.004f) continue;
                     /* in sight of how much of the light's block: a lantern is no
                      * point, and as one, an edge a block or two from it cast a
                      * hard shadow blown up across the ground, squaring its pool */
                     int seen = 0;
+                    float lt[3] = { 0 }; /* what gets through, summed over the taps */
                     for (int k = 0; k < BLK_TAPS; k++) {
                         float t[3] = { e->x + BLK_TAP[k][0] - o[0], e->y + BLK_TAP[k][1] - o[1], e->z + BLK_TAP[k][2] - o[2] };
                         float tl = sqrtf(t[0] * t[0] + t[1] * t[1] + t[2] * t[2]);
                         for (int a = 0; a < 3; a++) t[a] /= tl;
-                        seen += ray_to(o, t, tl + 1, e->x, e->y, e->z);
+                        float tr[3] = { 1, 1, 1 };
+                        if (ray_to(o, t, tl + 1, e->x, e->y, e->z, tr)) {
+                            seen++;
+                            for (int c = 0; c < 3; c++) lt[c] += tr[c];
+                        }
                     }
                     if (!seen) continue;
-                    l *= (float)seen / BLK_TAPS;
-                    dark *= 1 - l;
+                    for (int c = 0; c < 3; c++) dark[c] *= 1 - l * (lt[c] / BLK_TAPS);
                     if ((e->e - dist) / 15 > flood) flood = (e->e - dist) / 15;
                 }
             }
-    return 1 - dark * (1 - BLOCK_FILL * lvl_curve(flood));
+    for (int c = 0; c < 3; c++) out[c] = 1 - dark[c] * (1 - BLOCK_FILL * lvl_curve(flood));
 }
 
 #define SKY_RANGE 20.0f
@@ -359,25 +409,34 @@ float sun_only = -1;
 
 void light_one_sun(float th) { sun_only = th; }
 
-/* a leaf face takes the sun from behind too, through its leaves */
-static int sun_sees(const float sp[3], const float n[3], float th, int leaf) {
+/* a leaf face takes the sun from behind too, through its leaves; tr as
+ * ray_far_vis has it */
+static int sun_sees(const float sp[3], const float n[3], float th, int leaf, float tr[3]) {
     float d[3];
     sun_at(th, d);
-    return (leaf || n[0] * d[0] + n[1] * d[1] + n[2] * d[2] > 0) && ray_far_vis(sp, d, 200, leaf) >= 0.5f;
+    return (leaf || n[0] * d[0] + n[1] * d[1] + n[2] * d[2] > 0) && ray_far_vis(sp, d, 200, leaf, tr) >= 0.5f;
 }
 
 /* Where along the arc (0..pi) the sun gets past far blockers to p, facing
  * n, as up to two windows w[0]..w[1], w[2]..w[3] in 255ths of the arc; an
  * empty one has start > end. Sampled SUN_SAMPLES times, each change between
  * two samples found by bisection. Past two windows the smallest window or
- * gap goes (a gap closed, a window dropped). Returns the window count. */
-static int sun_window(const float p[3], const float n[3], int leaf, uint8_t w[4]) {
+ * gap goes (a gap closed, a window dropped). Returns the window count.
+ * filt: the share of the sun the filters on its way let through (stained
+ * glass), the mean over the samples that see it. */
+static int sun_window(const float p[3], const float n[3], int leaf, uint8_t w[4], float filt[3]) {
     w[0] = 0; w[1] = 255; w[2] = 255; w[3] = 0;
+    float fs[3] = { 0 };
+    int nseen = 0;
+    for (int c = 0; c < 3; c++) filt[c] = 1;
     /* start just clear of a lower block's 1/16 lip (dirt path, farmland),
      * whose neighbours would otherwise shade a whole corner */
     float sp[3] = { p[0] + n[0] * 0.1f, p[1] + n[1] * 0.1f, p[2] + n[2] * 0.1f };
     if (sun_only >= 0) { /* one angle: the whole arc or none of it */
-        if (sun_sees(sp, n, sun_only, leaf)) return 1;
+        if (sun_sees(sp, n, sun_only, leaf, filt)) {
+            if (filt[0] < 0) filt[0] = filt[1] = filt[2] = 1;
+            return 1;
+        }
         w[0] = 255; w[1] = 0;
         return 0;
     }
@@ -387,13 +446,18 @@ static int sun_window(const float p[3], const float n[3], int leaf, uint8_t w[4]
     float prev_th = 0;
     for (int i = 0; i < SUN_SAMPLES; i++) {
         float th = (i + 0.5f) * step;
-        int v = sun_sees(sp, n, th, leaf);
+        float tr[3] = { 1, 1, 1 };
+        int v = sun_sees(sp, n, th, leaf, tr);
+        if (v && tr[0] >= 0) {
+            for (int c = 0; c < 3; c++) fs[c] += tr[c];
+            nseen++;
+        }
         if (v != prev) {
             float lo = i ? prev_th : 0, hi = th;
             if (i)
                 for (int k = 0; k < SUN_REFINE; k++) {
                     float mid = (lo + hi) * 0.5f;
-                    if (sun_sees(sp, n, mid, leaf) == v) hi = mid; else lo = mid;
+                    if (sun_sees(sp, n, mid, leaf, NULL) == v) hi = mid; else lo = mid;
                 }
             float edge = i ? (lo + hi) * 0.5f : 0;
             if (v) iv[nw][0] = edge;
@@ -403,6 +467,8 @@ static int sun_window(const float p[3], const float n[3], int leaf, uint8_t w[4]
         prev_th = th;
     }
     if (prev) iv[nw++][1] = PI;
+    if (nseen)
+        for (int c = 0; c < 3; c++) filt[c] = fs[c] / nseen;
     while (nw > 2) {
         int best = 0, gap = 0;
         float bl = 1e9f;
@@ -441,17 +507,19 @@ static void bake(const float p[3], const float n[3], int leaf, float out[3], flo
     for (int i = 0; i < SKY_RAYS; i++) open += ray_free(so, sky_dirs[i], SKY_RANGE, 0);
     float sky = SKY_FLOOR + (1 - SKY_FLOOR) * (float)open / SKY_RAYS;
     float shade = face_shade(n, leaf);
-    float blk = block_light_at(p, n);
-    prm[0] = (float)open; prm[1] = blk;
+    float blk[3];
+    block_light_at(p, n, blk);
+    /* the coarse cells' block light is one level: the brightest channel */
+    prm[0] = (float)open; prm[1] = fmaxf(fmaxf(blk[0], blk[1]), blk[2]);
     float lit[3][3];
     for (int c = 0; c < 3; c++) {
         for (int k = 0; k < 2; k++) {
-            float l = SKY_COL[c] * sky + BLOCK_DAY * BLOCK_COL[c] * blk + (k ? 0 : SUN_COL[c] * sun);
+            float l = SKY_COL[c] * sky + BLOCK_DAY * BLOCK_COL[c] * blk[c] + (k ? 0 : SUN_COL[c] * sun);
             l = l < LIGHT_MIN ? LIGHT_MIN : l > LIGHT_MAX ? LIGHT_MAX : l;
             lit[k][c] = l * shade * ALBEDO;
         }
         /* at full strength, no floor: unlit corners stay 0 */
-        float l = BLOCK_COL[c] * blk;
+        float l = BLOCK_COL[c] * blk[c];
         lit[2][c] = (l > BLOCK_MAX ? BLOCK_MAX : l) * shade * ALBEDO;
     }
     /* orthonormal basis (t, b, n) for the underwater samples */
@@ -546,7 +614,9 @@ int corner_light(const float p[3], const float n[3], int leaf, float L[5][3], ui
         return e->nwin;
     }
     bake(p, n, leaf, L[0], L[1], L[2], L[3]);
-    int nwin = sun_window(p, n, leaf, swin);
+    float filt[3];
+    int nwin = sun_window(p, n, leaf, swin, filt);
+    for (int c = 0; c < 3; c++) L[0][c] = L[1][c] + (L[0][c] - L[1][c]) * filt[c];
     uint16_t bq[BOUNCE_ANGLES][3];
     bounce(p, n, B);
     for (int k = 0; k < BOUNCE_ANGLES; k++)

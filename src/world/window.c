@@ -53,7 +53,8 @@ int prism_open(const char *jar) {
     occl = calloc((nvox + 63) / 64, 8);
     focc = calloc((nvox + 63) / 64, 8);
     pocc = calloc((nvox + 63) / 64, 8);
-    if (!occl || !focc || !pocc) { fprintf(stderr, "oom\n"); return -1; }
+    gocc = calloc((nvox + 63) / 64, 8);
+    if (!occl || !focc || !pocc || !gocc) { fprintf(stderr, "oom\n"); return -1; }
     setup_dirs();
     setup_bounce();
     return 0;
@@ -172,15 +173,17 @@ void window_load(const char *rdir, int c0x, int c0z, canvas_t *atlas, long *lit,
     memset(occl, 0, (nvox + 63) / 64 * 8);
     memset(focc, 0, (nvox + 63) / 64 * 8);
     memset(pocc, 0, (nvox + 63) / 64 * 8);
+    memset(gocc, 0, (nvox + 63) / 64 * 8);
     occ_top = 0;
     for (int i = 0; i < HM_W * HM_W; i++) hm_top[i] = -1;
     for (int i = 0; i < HM_BW * HM_BW; i++) hm_big[i] = -1;
     for (size_t i = 0; i < nvox; i++)
-        if (states[grid[i]].occl || states[grid[i]].far_occl || states[grid[i]].up_lit) {
-            /* the heights (hm_skip, occ_top) take thin blockers and plants too */
+        if (states[grid[i]].occl || states[grid[i]].far_occl || states[grid[i]].up_lit || states[grid[i]].filters) {
+            /* the heights (hm_skip, occ_top) take thin blockers, plants and filters too */
             if (states[grid[i]].occl) occl[i >> 6] |= 1ull << (i & 63);
             else if (states[grid[i]].far_occl) focc[i >> 6] |= 1ull << (i & 63);
-            else pocc[i >> 6] |= 1ull << (i & 63);
+            else if (states[grid[i]].up_lit) pocc[i >> 6] |= 1ull << (i & 63);
+            else gocc[i >> 6] |= 1ull << (i & 63);
             int y = (int)(i / ((size_t)GW * GW)), x = (int)(i % GW), z = (int)((i / GW) % GW);
             if (y > occ_top) occ_top = y;
             int16_t *h = &hm_top[(z / HM_CELL) * HM_W + x / HM_CELL];

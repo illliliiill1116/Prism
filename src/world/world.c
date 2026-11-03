@@ -91,6 +91,8 @@ uint64_t *focc;   /* 1 bit per voxel: a thin blocker (far_occl) */
  * (see ray_far_vis) */
 uint64_t *pocc;
 
+uint64_t *gocc;
+
 long chunks_loaded;
 
 /* Sky light, 4 bits per voxel, computed like Minecraft's: 15 above each

@@ -63,6 +63,8 @@ typedef struct {
     uint8_t jitter; /* the game's random XYZ offset (grass, ferns) */
     uint8_t emit;   /* block light given off, 0..15 */
     uint8_t be_tex; /* its block entity may give it its own texture (banner, player head, decorated pot) */
+    uint8_t filters; /* see-through, blended (stained glass, ice): colours light through it by filt */
+    float filt[3];   /* the share of light it lets through, per channel, as the light is (sRGB) */
     float face_col[6][3]; /* L2: mean texture colour per face direction, linear, fixed tint applied */
     int8_t face_bc[6];    /* L2: biome colour family to multiply by, -1 none */
     uint32_t name_hash; /* block name only, for same-block culling across states */
@@ -98,6 +100,7 @@ extern uint32_t slot_hcap;
 extern uint32_t atlas_w, atlas_h;
 uint32_t tex_slot(const canvas_t *t);
 int tex_opaque(const canvas_t *t);
+void tex_filt(const canvas_t *t, float u0, float v0, float u1, float v1, float out[3]);
 canvas_t build_atlas(void);
 
 /* ---- world/world.c ---- */
@@ -147,6 +150,13 @@ extern uint64_t *pocc;
 static inline int pocc_at(int x, int y, int z) {
     size_t i = gidx(x, y, z);
     return (int)((pocc[i >> 6] >> (i & 63)) & 1);
+}
+
+extern uint64_t *gocc; /* 1 bit per voxel: a filter (state filters) */
+
+static inline int gocc_at(int x, int y, int z) {
+    size_t i = gidx(x, y, z);
+    return (int)((gocc[i >> 6] >> (i & 63)) & 1);
 }
 
 static inline int focc_at(int x, int y, int z) {
