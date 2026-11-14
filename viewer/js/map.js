@@ -13,7 +13,7 @@ const workerUrl = workerSrc.origin === location.origin ? workerSrc
     : URL.createObjectURL(new Blob([`import ${JSON.stringify(workerSrc.href)};`], { type: "text/javascript" }));
 
 export function setupMap(app) {
-    const { LAYER_OVER, MSAA, PLANT_FADE, RIPPLE, RIPPLES, RIPPLE_MOVE_PX, WAVE, camera, controls, depthMat, depthMats,
+    const { LAYER_OVER, MSAA, PLANT_FADE, RIPPLE, RIPPLE_LONG, RIPPLE_MOVE_PX, WAVE, camera, controls, depthMat, depthMats,
             draw, fitFog, info, patchCutout, patchLight, patchWater, q, renderer, requestDraw, rippleU, scene, setFx,
             shadowBox, shadowMeshes, shadowOn, zoomK } = app;
 
@@ -522,7 +522,7 @@ export function setupMap(app) {
     /* whether water in view is near enough to ripple (see RIPPLE) */
     function rippleNear() {
         if (!(RIPPLE > 0)) return false;
-        const far = RIPPLES[0][0] / RIPPLE_MOVE_PX / rippleU.uPixK.value;
+        const far = RIPPLE_LONG / RIPPLE_MOVE_PX / rippleU.uPixK.value;
         swayFrustum.setFromProjectionMatrix(swayM.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
         for (const t of app.map.tiles) {
             const w = t.shown >= 0 && t.lod[t.shown] && t.lod[t.shown].water;

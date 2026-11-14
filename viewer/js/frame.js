@@ -6,7 +6,7 @@ import * as THREE from "three";
 
 export function setupFrame(app) {
     const { PR_MAX, PR_MIN, RIPPLE, WAVE, WAVE_FPS, camera, composer, controls, diag, fitTilt, linBlend, rayU,
-            renderShadow, renderer, rippleU, scene, shadowBox, shadowMeshes, sizeEffects, sky, stats, tiltH, tiltV,
+            renderShadow, renderer, rippleU, scene, updateWaves, shadowBox, shadowMeshes, sizeEffects, sky, stats, tiltH, tiltV,
             waterMats, waveU } = app;
     /* one frame finished on the GPU (?diag&bench, the test hooks), in ms; fresh = with a new shadow map */
     function timeFrame(fresh) {
@@ -103,6 +103,7 @@ export function setupFrame(app) {
         waveU.uTime.value = (app.shot ? app.shot.time : performance.now()) / 1000;
         rippleU.uPixK.value = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) / renderer.domElement.height / (app.shot ? app.shot.k : 1);
         sky.material.uniforms.uTime.value = waveU.uTime.value;
+        updateWaves(waveU.uTime.value);
         if (app.map) app.updateTiles();
         if (!app.shot) renderShadow(); /* its fit follows the frustum: a photo's tiles keep the whole view's */
         faceCullAll(null);

@@ -280,7 +280,11 @@ void main() {
 	col = mix(col, mix(uHorizon, uZenith, 0.45), smoothstep(0.0, -0.9, d.y));
 	float s = max(dot(d, uSun), 0.0);
 	col += uSunCol * pow(s, 120.0) * 0.5;
-	col = mix(col, uSunCol * 6.0, smoothstep(0.9993, 0.9996, s));
+	/* the glow stops at white: what bloom spreads is the disc's light, not a
+	   patch of sky tens of degrees wide that is past white already */
+	col = min(col, vec3(1.0));
+	/* no disc once the sun's light is gone (under the horizon, seen from a height: it drew black) */
+	col = mix(col, uSunCol * 6.0, smoothstep(0.9993, 0.9996, s) * min(1.0, 8.0 * max(uSunCol.r, max(uSunCol.g, uSunCol.b))));
 	/* at night the moon, opposite the sun, and stars */
 	float m = max(-dot(d, uSun), 0.0);
 	col += uNight * (vec3(0.30, 0.34, 0.45) * pow(m, 60.0) * 0.06 + vec3(0.75, 0.80, 0.95) * smoothstep(0.99955, 0.9998, m));

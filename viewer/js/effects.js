@@ -369,8 +369,25 @@ void main() {
     const grade = new ShaderPass(GradeShader);
     grade.uniforms.uSat.value = q.has("sat") ? Number(q.get("sat")) : 0.8;
     composer.addPass(grade);
-    const bloom = new UnrealBloomPass(new THREE.Vector2(app.width, app.height), 0.22, 0.5, 0.85);
+    const bloom = new UnrealBloomPass(new THREE.Vector2(app.width, app.height), 0.4, 0.5, 0.85);
     if (q.has("bloom")) bloom.strength = Number(q.get("bloom"));
+    /* What blooms is the light over the threshold, not the whole of every
+     * pixel past it: three's own filter passes those whole, so a wide area just
+     * over the line (the sky round a low sun, sand at noon) glowed as much as a
+     * lamp and went flat white, with an edge where it crossed the line. */
+    {
+        bloom.materialHighPassFilter.fragmentShader = `uniform sampler2D tDiffuse;
+uniform float luminosityThreshold, smoothWidth;
+varying vec2 vUv;
+void main() {
+	vec3 c = texture2D(tDiffuse, vUv).rgb;
+	float l = dot(c, vec3(0.299, 0.587, 0.114));
+	float soft = clamp(l - luminosityThreshold + smoothWidth, 0.0, 2.0 * smoothWidth);
+	float over = max(soft * soft / (4.0 * smoothWidth), l - luminosityThreshold);
+	gl_FragColor = vec4(c * (over / max(l, 1e-4)), 1.0);
+}`;
+        bloom.highPassUniforms.smoothWidth.value = 0.1;
+    }
     composer.addPass(bloom);
     /* In a photo's tiles the bloom is the whole view's, kept from a screen-sized
      * frame (shotBloom) and added over the tile's part of it: bloom's glow is
