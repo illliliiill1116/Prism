@@ -2,7 +2,19 @@
  * prism map: a whole world baked into a map for the viewer (?map=), and on
  * later runs baked again only where the world changed.
  *
- *   prism map <client.jar> <world or region dir> <out dir> [--threads n]
+ *   prism map <client.jar> <world or region dir> <out dir> [--threads n] [--near x,z,r]
+ *             [--clip x0,z0,x1,z1,ymin]
+ *
+ * --near bakes only the regions within r regions of the one block x, z is
+ * in (map.json then lists only those). The browser build, which can't
+ * start a process a region, does the bakes itself between two runs of
+ * this: --plan prints what a run would do ("bake rx rz why" or "keep rx
+ * rz", a line a region) and stops there, --index bakes nothing and writes
+ * map.json from the bakes there are.
+ *
+ * --clip bakes only the box between world blocks x0, z0 and x1, z1 (both
+ * inside), from ymin up, as if the world were nothing else: a diorama.
+ * Changing it doesn't make a bake stale: use another out dir.
  *
  * Each region file goes into <out>/r.<x>.<z>/ (its bake's log in
  * r.<x>.<z>.log), and <out>/map.json lists them all with their tile counts
@@ -20,38 +32,18 @@
 #include "cli.h"
 #include <dirent.h>
 #include <errno.h>
-#include <ftw.h>
+#ifndef _WIN32
 #include <sys/wait.h>
 #include <unistd.h>
+#endif
 
 #define BAKE_MB 1800 /* a region's bake at its peak, about (IHOU's dense build: 1.8 GB) */
 
 typedef struct { int rx, rz; } reg_t;
 
-/* MemAvailable, in MB, or -1 */
-static long mem_available_mb(void) {
-    FILE *f = fopen("/proc/meminfo", "r");
-    char line[256];
-    long kb = -1;
-    while (f && fgets(line, sizeof line, f))
-        if (sscanf(line, "MemAvailable: %ld kB", &kb) == 1) break;
-    if (f) fclose(f);
-    return kb < 0 ? -1 : kb / 1024;
-}
-
 static int by_name(const void *a, const void *b) {
     const reg_t *p = a, *q = b;
     return p->rx != q->rx ? (p->rx < q->rx ? -1 : 1) : (p->rz > q->rz) - (p->rz < q->rz);
-}
-
-static int rm_one(const char *path, const struct stat *st, int flag, struct FTW *ftw) {
-    (void)st; (void)flag; (void)ftw;
-    return remove(path);
-}
-
-static void rm_tree(const char *path) {
-    struct stat st;
-    if (lstat(path, &st) == 0) nftw(path, rm_one, 16, FTW_DEPTH | FTW_PHYS);
 }
 
 static char *read_file(const char *path, size_t *len) {
@@ -160,14 +152,27 @@ static void show_warnings(const char *log) {
     if (f) fclose(f);
 }
 
-/* Bakes region rx, rz into dir in a child process (each bake starts from
- * the state prism_open left, and gives its memory back when done), by way
- * of dir.new. Its log goes to log. */
-static int bake_one(const char *rdir, int rx, int rz, const char *dir, const char *log, int nthreads) {
+/* Bakes region rx, rz into dir in a process of its own (each bake starts
+ * from the state prism_open left, and gives its memory back when done), by
+ * way of dir.new. Its log goes to log. POSIX forks this one, opened
+ * already; Windows can't, and starts prism bake. */
+static int bake_one(const char *jar, const char *rdir, int rx, int rz, const char *dir, const char *log, int nthreads,
+                    const char *clip_arg) {
     char tmp[4096];
     snprintf(tmp, sizeof tmp, "%s.new", dir);
-    rm_tree(tmp);
+    plat_rmtree(tmp);
     fflush(stdout);
+#ifdef _WIN32
+    char sx[16], sz[16], st[16];
+    snprintf(sx, sizeof sx, "%d", rx);
+    snprintf(sz, sizeof sz, "%d", rz);
+    snprintf(st, sizeof st, "%d", nthreads);
+    remove(log);
+    const char *argv[] = { "prism", "bake", jar, rdir, sx, sz, tmp, st, clip_arg ? "--clip" : NULL, clip_arg, NULL };
+    plat_proc_t p;
+    if (plat_proc_start(&p, argv, log) || plat_proc_wait(&p)) { plat_rmtree(tmp); return 1; }
+#else
+    (void)jar; (void)clip_arg; /* clip is set already */
     pid_t pid = fork();
     if (pid < 0) { perror("fork"); return 1; }
     if (pid == 0) {
@@ -177,25 +182,35 @@ static int bake_one(const char *rdir, int rx, int rz, const char *dir, const cha
         _exit(rc ? 1 : 0);
     }
     int status;
-    if (waitpid(pid, &status, 0) < 0 || !WIFEXITED(status) || WEXITSTATUS(status)) { rm_tree(tmp); return 1; }
+    if (waitpid(pid, &status, 0) < 0 || !WIFEXITED(status) || WEXITSTATUS(status)) { plat_rmtree(tmp); return 1; }
+#endif
     /* the old bake out of the way and the new one in: two renames, so the
        region is missing only between them, not while the old one is deleted */
     char old[4096];
     snprintf(old, sizeof old, "%s.old", dir);
-    rm_tree(old);
-    if (rename(dir, old) && errno != ENOENT) { perror(dir); rm_tree(tmp); return 1; }
-    if (rename(tmp, dir)) { perror(dir); return 1; }
-    rm_tree(old);
+    plat_rmtree(old);
+    if (plat_is_dir(dir) && plat_rename(dir, old)) { perror(dir); plat_rmtree(tmp); return 1; }
+    if (plat_rename(tmp, dir)) { perror(dir); return 1; }
+    plat_rmtree(old);
     return 0;
 }
 
 int cmd_map(int argc, char **argv) {
-    const char *usage = "usage: prism map <client.jar> <world or region dir> <out dir> [--threads n]\n";
+    const char *usage = "usage: prism map <client.jar> <world or region dir> <out dir> [--threads n] [--near x,z,r] [--clip x0,z0,x1,z1,ymin]\n"
+                        "                 [--plan | --index]\n";
     if (argc < 4) { fputs(usage, stderr); return 2; }
     const char *jar = argv[1], *out = argv[3];
-    int nthreads = (int)sysconf(_SC_NPROCESSORS_ONLN);
+    int nthreads = plat_ncpu(), near = 0, nx = 0, nz = 0, nr = 0, plan = 0, index_only = 0;
+    const char *clip_arg = NULL;
     for (int i = 4; i < argc; i++) {
         if (strcmp(argv[i], "--threads") == 0 && i + 1 < argc) nthreads = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--near") == 0 && i + 1 < argc && sscanf(argv[++i], "%d,%d,%d", &nx, &nz, &nr) == 3 && nr >= 0)
+            near = 1;
+        else if (strcmp(argv[i], "--clip") == 0 && i + 1 < argc) {
+            if (parse_clip(clip_arg = argv[++i])) { fprintf(stderr, "--clip x0,z0,x1,z1,ymin (ymin -64..319)\n"); return 2; }
+        }
+        else if (strcmp(argv[i], "--plan") == 0) plan = 1;
+        else if (strcmp(argv[i], "--index") == 0) index_only = 1;
         else { fprintf(stderr, "unknown option %s\n%s", argv[i], usage); return 2; }
     }
     if (nthreads < 1) { fprintf(stderr, "threads: 1 or more\n"); return 2; }
@@ -213,6 +228,10 @@ int cmd_map(int argc, char **argv) {
         char path[4096];
         snprintf(path, sizeof path, "%s/%s", rdir, e->d_name);
         if (stat(path, &st) || st.st_size == 0) continue;
+        /* --near: the regions within r of the one block x, z is in */
+        if (near && (abs(rx - (nx >> 9)) > nr || abs(rz - (nz >> 9)) > nr)) continue;
+        /* --clip: the regions the box is in */
+        if (clip_on && (rx < clip[0] >> 9 || rx > clip[2] >> 9 || rz < clip[1] >> 9 || rz > clip[3] >> 9)) continue;
         if (n == cap && !(regs = realloc(regs, (size_t)(cap = cap ? cap * 2 : 64) * sizeof *regs))) { fprintf(stderr, "oom\n"); return 1; }
         regs[n++] = (reg_t){ rx, rz };
     }
@@ -220,20 +239,32 @@ int cmd_map(int argc, char **argv) {
     if (!n) { fprintf(stderr, "no region files in %s\n", rdir); return 1; }
     qsort(regs, (size_t)n, sizeof *regs, by_name);
 
-    if (mkdir(out, 0755) && errno != EEXIST) { perror(out); return 1; }
+    if (plat_mkdir(out)) { perror(out); return 1; }
+    printf("regions: %d\n", n);
     /* player heads wear the skins in PRISM_SKINS, by default skins/ next to the map */
     if (!getenv("PRISM_SKINS")) {
         char skins[4096];
         snprintf(skins, sizeof skins, "%s/../skins", out);
-        setenv("PRISM_SKINS", skins, 1);
+        plat_setenv("PRISM_SKINS", skins);
     }
-    long long exe_mtime = stat("/proc/self/exe", &st) == 0 ? (long long)st.st_mtime : 0;
-    long avail = mem_available_mb();
+    long long exe_mtime = plat_self_mtime();
+    if (plan) {
+        for (int i = 0; i < n; i++) {
+            char dir[4096], why[64];
+            snprintf(dir, sizeof dir, "%s/r.%d.%d", out, regs[i].rx, regs[i].rz);
+            const char *reason = stale(rdir, dir, regs, n, i, exe_mtime, why, sizeof why);
+            if (reason) printf("bake %d %d %s\n", regs[i].rx, regs[i].rz, reason);
+            else printf("keep %d %d\n", regs[i].rx, regs[i].rz);
+        }
+        free(regs);
+        return 0;
+    }
+    long avail = index_only ? -1 : plat_mem_available_mb();
     if (avail >= 0 && avail < BAKE_MB)
         fprintf(stderr, "warning: %ld MB of memory available, and baking a region can take up to about %d MB\n",
                 avail, BAKE_MB);
     big_allocs_mapped();
-    if (prism_open(jar)) return 1;
+    if (!index_only && prism_open(jar)) return 1;
 
     int failed = 0, baked = 0;
     str_t list = { 0 };
@@ -245,13 +276,14 @@ int cmd_map(int argc, char **argv) {
         char dir[4096], log[4096], why[64];
         snprintf(dir, sizeof dir, "%s/r.%d.%d", out, regs[i].rx, regs[i].rz);
         snprintf(log, sizeof log, "%s.log", dir);
-        const char *reason = stale(rdir, dir, regs, n, i, exe_mtime, why, sizeof why);
-        if (!reason) printf("r.%d.%d: up to date\n", regs[i].rx, regs[i].rz);
+        const char *reason = index_only ? NULL : stale(rdir, dir, regs, n, i, exe_mtime, why, sizeof why);
+        if (index_only) {}
+        else if (!reason) printf("r.%d.%d: up to date\n", regs[i].rx, regs[i].rz);
         else {
             printf("r.%d.%d: baking (%s)... ", regs[i].rx, regs[i].rz, reason);
             fflush(stdout);
             double t0 = now_s();
-            if (bake_one(rdir, regs[i].rx, regs[i].rz, dir, log, nthreads)) {
+            if (bake_one(jar, rdir, regs[i].rx, regs[i].rz, dir, log, nthreads, clip_arg)) {
                 printf("failed, see %s\n", log);
                 failed++;
             } else {

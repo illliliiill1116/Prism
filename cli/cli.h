@@ -42,5 +42,12 @@ int bake_region(const char *rdir, int c0x, int c0z, const char *out, int nthread
 int write_atomic(const char *path, const void *p, size_t n);
 int cmd_map(int argc, char **argv);
 int cmd_iso(int argc, char **argv);
+int cmd_serve(int argc, char **argv);
+int cmd_info(int argc, char **argv);
+
+/* what a world's level.dat says (info.c) */
+typedef struct { char name[256], version[64]; int spawn_x, spawn_z; } level_t;
+void read_level(const char *world, level_t *lv);
+void json_str(str_t *o, const char *s);
 
 #endif

@@ -35,11 +35,12 @@ import { setupFrame } from "./frame.js";
 import { setupMap } from "./map.js";
 import { setupGlb } from "./glb.js";
 import { setupControls } from "./controls.js";
+import { setupWalk } from "./walk.js";
 import { setupLens } from "./lens.js";
 import { setupPhoto } from "./photo.js";
 
 /* the URL parameters that make up the view (see onView) */
-export const VIEW_KEYS = ["cam", "at", "sun", "fly", "fov", "ev", "wb", "fstop", "mini"];
+export const VIEW_KEYS = ["cam", "at", "sun", "fly", "walk", "fov", "ev", "wb", "fstop", "mini"];
 
 const FULL_ICON = `<svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"
   stroke-linecap="round" aria-hidden="true"><path d="M3 7V3h4M13 3h4v4M17 13v4h-4M7 17H3v-4"/></svg>`;
@@ -70,6 +71,7 @@ const UI = `
     <dt>Look around</dt><dd>drag; right-drag pans, the wheel or the bar on the right zooms</dd>
     <dt>Move</dt><dd><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or the pad, <kbd>Q</kbd>/<kbd>E</kbd> down/up, <kbd>Shift</kbd> faster</dd>
     <dt>Fly</dt><dd><kbd>V</kbd> or the person button; click to steer with the mouse, <kbd>Esc</kbd> lets go, the wheel sets the speed</dd>
+    <dt>Walk</dt><dd><kbd>G</kbd> while flying; <kbd>W</kbd> twice or <kbd>Shift</kbd> runs, <kbd>Space</kbd> jumps, swims and climbs</dd>
     <dt>Time of day</dt><dd>the slider top left, or <kbd>[</kbd> <kbd>]</kbd>; <kbd>T</kbd> or ▶ lets the day go by</dd>
     <dt>Camera</dt><dd><kbd>C</kbd> or CAM: focal length, exposure, white balance, aperture</dd>
     <dt>More</dt><dd><kbd>P</kbd> photo, <kbd>F</kbd> effects on/off, <kbd>H</kbd> hide the controls, <kbd>?</kbd> this help</dd>
@@ -178,6 +180,7 @@ export function createViewer(container, options = {}) {
     setupMap(app);
     setupGlb(app);
     setupControls(app);
+    setupWalk(app);
     setupLens(app);
     setupPhoto(app);
     setupBench(app);

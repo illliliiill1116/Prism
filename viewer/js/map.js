@@ -336,6 +336,7 @@ export function setupMap(app) {
             const idx = await getJson(`${base}/index.json`);
             if (idx.format !== FORMAT) throw Object.assign(new Error(stale(idx.format)), { final: true });
             region.ver = "?" + idx.ver;
+            region.solid = idx.solid || 0; /* solid.bin's length, for walk.js; 0 baked before it */
             region.group = new THREE.Group();
             region.mats = regionMaterials(`${base}/${idx.atlas}`);
             region.group.position.set(idx.origin[0], 0, idx.origin[1]);

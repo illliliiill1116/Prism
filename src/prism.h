@@ -14,6 +14,7 @@
 #include "world/tint.h"
 #include "zip_reader.h"
 #include "world/skin.h"
+#include "plat.h"
 #include <zlib.h>
 #include <math.h>
 #include <stdarg.h>
@@ -24,6 +25,15 @@
 #include <sys/stat.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* sin, cos, exp and pow of a float as the double ones rounded to float:
+ * the C libraries' float versions differ in the last bit (glibc's and the
+ * browser build's musl), and a last bit can tip a corner's sun window, so
+ * the builds would bake differently; rounded from double they agree. */
+static inline float dsinf(float x) { return (float)sin(x); }
+static inline float dcosf(float x) { return (float)cos(x); }
+static inline float dexpf(float x) { return (float)exp(x); }
+static inline float dpowf(float x, float y) { return (float)pow(x, y); }
 #include <time.h>
 
 /* ---- shared ---- */
@@ -68,7 +78,15 @@ typedef struct {
     float face_col[6][3]; /* L2: mean texture colour per face direction, linear, fixed tint applied */
     int8_t face_bc[6];    /* L2: biome colour family to multiply by, -1 none */
     uint32_t name_hash; /* block name only, for same-block culling across states */
+    uint32_t coll;      /* what a walker bumps into, see collision_of */
 } state_t;
+
+/* state_t coll: per quarter of the block's floor (bits 4q..4q+3, q = 2 qz
+ * + qx, x and z 0 for the half nearer -x, -z) the height it is solid to, in
+ * 15ths of a block, 0 none; then these flags */
+#define COLL_WATER (1u << 16)
+#define COLL_LAVA (1u << 17)
+#define COLL_CLIMB (1u << 18)
 
 extern state_t *states;
 extern uint32_t nstates, cap_states;
@@ -419,6 +437,11 @@ int pack_level2(mbuf_t merged[MAT_COUNT], size_t tile_q0[MAT_COUNT][NTILES + 1],
                 bytes_t *l2, int nthreads);
 int write_tiles(const char *path, bytes_t *l2, bytes_t gzs[NTILES][3], uint64_t at[NTILES][4]);
 
+/* ---- tiles/solid.c ---- */
+
+#define SOLID_FILE "solid.bin"
+int pack_solid(bytes_t *file, int nthreads);
+
 /* ---- world/window.c ---- */
 
 int prism_open(const char *jar);
@@ -426,6 +449,11 @@ int prism_open(const char *jar);
 void light_caches_clear(void);
 void window_load(const char *rdir, int c0x, int c0z, canvas_t *atlas, long *lit, long *emitters);
 void window_clear_outside(int x0, int z0, int x1, int z1, int ymin);
+/* --clip x0,z0,x1,z1,ymin: window_load keeps only that box of the world
+ * (corners inclusive, world blocks) and nothing under ymin, before the
+ * light, so it stands alone: its cut sides lit as the open air they face */
+extern int clip_on, clip[5];
+int parse_clip(const char *s);
 
 /* ---- iso/isodraw.c ---- */
 

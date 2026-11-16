@@ -64,7 +64,9 @@ export function setupControls(app) {
         if (held.has("l")) step.sub(right);
         if (held.has("u")) step.y += 1;
         if (held.has("d")) step.y -= 1;
-        if (step.lengthSq() > 0 && app.flying) {
+        if (app.walking) {
+            /* walk.js moves the walker */
+        } else if (step.lengthSq() > 0 && app.flying) {
             step.set(0, 0, 0);
             camera.getWorldDirection(fwd);
             if (held.has("f")) step.add(fwd);
@@ -208,7 +210,7 @@ export function setupControls(app) {
             syncLook();
             if (matchMedia("(pointer: fine)").matches) {
                 lockPointer();
-                hint(`fly: click to look with the mouse, Esc to let go; W flies, Space/Shift up/down, wheel ${flySpeed} blocks/s`, 5000);
+                hint(`fly: click to look with the mouse, Esc to let go; W flies, Space/Shift up/down, wheel ${flySpeed} blocks/s, G walks`, 5000);
             } else hint("fly: drag to look, the pad moves");
         } else {
             if (document.pointerLockElement) document.exitPointerLock();
@@ -216,9 +218,9 @@ export function setupControls(app) {
             hint("orbit");
         }
     }
-    flyBtn.addEventListener("click", () => { flyBtn.blur(); setFly(!app.flying); });
+    flyBtn.addEventListener("click", () => { flyBtn.blur(); app.setFly(!app.flying); });
     app.on(app.keys, "keydown", e => {
-        if (e.code === "KeyV" && !e.ctrlKey && !e.metaKey && !e.altKey) setFly(!app.flying);
+        if (e.code === "KeyV" && !e.ctrlKey && !e.metaKey && !e.altKey) app.setFly(!app.flying);
     });
     const cvs = renderer.domElement;
     app.on(document, "mousemove", e => {
@@ -256,7 +258,9 @@ export function setupControls(app) {
     app.on(document, "pointerlockchange", () => {
         if (app.flying && document.pointerLockElement !== cvs) hint("mouse released: click to look again, V to orbit");
     });
-    if (q.get("fly") === "1") setFly(true);
+    /* walk.js reads the keys held and where the view points, and wraps setFly */
+    Object.assign(app, { held, flyTarget, setFly, lookAngles: () => [yaw, pitch] });
+    if (q.get("fly") === "1") app.setFly(true);
 
     /* the sun: [ and ] or the time-of-day bar move it, T or its button sets
      * it going round, crossing the sky in three minutes and the moonlit night

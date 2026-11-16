@@ -29,7 +29,53 @@ so and the map has to be baked again.
 
 Viewed in real time in Chrome.
 
+- **[Demo](https://illliliiill1116.github.io/Prism/demo/)**: a piece of a world, baked on its own, in the viewer.
+- **[Bake your own world](https://illliliiill1116.github.io/Prism/app/)**: the app in the browser, no install
+  (Chrome or Edge).
+
 The map in them is "IHOU", not part of this project (see [License](#license)).
+
+## The app (no commands)
+
+Run `prism` with no arguments (on Windows, double-click `prism.exe`). It
+opens a page in the browser that lists the worlds in Minecraft's saves
+folder and the maps baked so far. Pick a world, how much of it (a few
+regions around the spawn, or all of it) and which installed game version's
+textures to use, and it bakes it with a progress bar; then open it in the
+viewer. "Update" bakes again only what changed in the world since.
+
+It is a small web server on this computer only (`127.0.0.1`, port 8820 or
+the next free one), with the page and the viewer built in. It stops when
+its window is closed. The maps go to `%LOCALAPPDATA%\Prism\maps` on
+Windows and `~/.local/share/prism/maps` elsewhere, one folder per world,
+each a map as `prism map` makes it (so it can be put on a website as it
+is, see [Viewing](#viewing)). The viewer loads three.js from jsDelivr, so
+the page needs the internet.
+
+```bash
+build/prism serve [--port n] [--mc dir] [--data dir] [--no-open]
+```
+
+`--mc` is Minecraft's folder (by default `%APPDATA%\.minecraft` or
+`~/.minecraft`), `--data` where the maps go, `--no-open` leaves the
+browser alone.
+
+## In the browser
+
+The same app runs with no program to install: put `build-web/` on any
+static host (GitHub Pages too) and open it in Chrome or Edge. Drop a world
+folder on the page (or the whole `saves` folder), or choose one with the
+button. It bakes in the page with prism built for the browser, and keeps
+the maps in the browser's own storage; nothing is uploaded. The textures
+come from Mojang's servers (the client jar of the world's version, about
+40 MB, downloaded once). Chrome won't let a page pick a folder in
+`AppData`, so the page can't be given `.minecraft` itself, and the world
+has to be dropped again to update its map.
+
+A service worker (`sw.js`) serves the maps to the viewer and gives the
+pages the headers prism's threads need, so the first visit reloads once.
+A bake there takes about 1.1 to 1.4 times as long as the native one and up
+to about 1.7 GB of memory a region.
 
 ## Building
 
@@ -43,6 +89,20 @@ make
 This builds `build/prism`, `build/skinlist` and the libraries under
 `libs/` they use. The default flags include `-march=native`.
 
+`make win` cross-builds `build-win/prism.exe` for Windows 10 and later
+with MinGW-w64 (`sudo apt install gcc-mingw-w64-x86-64
+libz-mingw-w64-dev`): one file, everything linked in, for any x86-64 CPU
+from about 2009 on (`-march=x86-64-v2`). Windows 11's Smart App Control
+refuses to run it unless it is signed.
+
+`make web` builds the app as a static site in `build-web/`, with prism
+itself built from the same sources for the browser (Emscripten, emsdk on
+the `PATH`): see [In the browser](#in-the-browser). `make wasm` builds it
+to run under Node instead, as the command does. `scripts/wasm_check.sh <jar> <world> <rx>
+<rz>` bakes a region with both builds and checks they come out the same
+(the atlas's pixels and every tile decompressed; the compressed bytes may
+differ, each build having its own zlib).
+
 ## Baking a world
 
 ```bash
@@ -53,7 +113,11 @@ build/prism map ~/.minecraft/versions/26.2/26.2.jar \
 This bakes each region file into `out/mymap/r.<x>.<z>/` and lists them in
 `out/mymap/map.json`. The second argument is the world's folder or the
 folder of its overworld's region files. `--threads n` sets the thread
-count (default: all cores). A region file or chunk that cannot be read (a
+count (default: all cores). `--near x,z,r` bakes only the regions within
+`r` regions of the one block `x, z` is in. `--clip x0,z0,x1,z1,ymin`
+bakes only the box between blocks `x0, z0` and `x1, z1`, from `ymin` up,
+as if nothing else were there: a diorama with its sides cut open and lit.
+Changing the box does not count as a change: bake it into a new folder. A region file or chunk that cannot be read (a
 damaged save) is left empty, with a warning.
 
 Run it again after the world has changed and it bakes only what changed.
@@ -121,6 +185,26 @@ locally but wasteful over the internet.
 To put the viewer in a page of your own, or serve the map from another
 site, see [docs/embedding.md](docs/embedding.md).
 
+### The demo site
+
+```bash
+scripts/demo.sh <client.jar> <world dir> <x0,z0,x1,z1,ymin> \
+    [--out dir] [--title text] [--cam x,y,z --at x,y,z] [--sun deg]
+```
+
+bakes the box with `--clip` into `build-demo/` (or `--out`), with the
+viewer and a page of its own (`demo/index.html`), titled with the world's
+name. The page starts at `--cam` looking at `--at`, or else from above
+the box's north-west corner. It is a static site of its own, apart from
+the app's `build-web/`. `scripts/pages.sh` puts the two on the
+`gh-pages` branch, the app under `app/` and the demo under `demo/`, as
+one commit that replaces the last (then `git push -f origin gh-pages`). The demo linked above is
+
+```bash
+scripts/demo.sh 26.2.jar "New World" 1267,1003,1315,1045,35 \
+    --cam 1315,81.5,1038.2 --at 1292.7,68,1027.6
+```
+
 ### Controls
 
 - Drag to orbit, right-drag to pan, and use the wheel (or the bar on the
@@ -131,6 +215,10 @@ site, see [docs/embedding.md](docs/embedding.md).
   it was in orbit. Click to capture the mouse (Esc releases it). W flies
   where the view points, Space/E and Shift/Q go up/down, and the wheel sets
   the speed.
+- In fly mode, **G** walks: you fall to the ground and bump into blocks,
+  step up slabs and stairs, Space jumps (and swims, and climbs ladders and
+  vines), W pressed twice or Shift runs, moving as in Minecraft. **G** again flies. A map baked before walking was
+  added has nothing to walk on: bake it again.
 - The time-of-day bar at the top left sets the sun (06:00 sunrise, 18:00
   sunset, the moon by night); **[** and **]** step it, and **T** or ▶ lets
   the day go by.
@@ -153,7 +241,7 @@ place. Embedded, the same names are `createViewer`'s options.
 | `map=<dir>` | The baked map to load |
 | `cam=x,y,z`, `at=x,y,z` | Camera position and target, in world coordinates |
 | `sun=<deg>` | Sun angle: 0 sunrise (east), 180 sunset, 180–360 night |
-| `fly=1`, `fov=<deg>` | Fly mode, field of view |
+| `fly=1`, `walk=1`, `fov=<deg>` | Fly mode, walking (with `fly=1`), field of view |
 | `fx=0` | Start with the effects off |
 | `ev=`, `wb=`, `fstop=`, `mini=1` | Exposure, white balance, aperture, miniature blur |
 | `wave=`, `ripple=` | Plant sway and water ripple strength (0 = still) |
@@ -213,7 +301,7 @@ Where things are in the source: [docs/developing.md](docs/developing.md).
 
 ## Limitations
 
-- Linux only. Overworld only.
+- Built on Linux (also for Windows, see [Building](#building)); macOS untested. Overworld only.
 - Entities (mobs, item frames, paintings, armour stands, boats, minecarts)
   are not drawn, nor is the text on signs.
 - Barriers, light blocks and structure voids are not drawn; they are

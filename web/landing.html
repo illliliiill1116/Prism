@@ -1,0 +1,35 @@
+<!doctype html>
+<!-- The GitHub Pages site's front page (scripts/pages.sh): the app and the
+     demo each live in a folder of their own under it. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>prism</title>
+<style>
+:root { color-scheme: light dark; --bg: #f6f3ee; --card: #fffdf9; --ink: #2b2620; --dim: #7a7066; --line: #e4ddd2; --accent: #c0673a; }
+@media (prefers-color-scheme: dark) {
+    :root { --bg: #1b1916; --card: #24211d; --ink: #ece6dd; --dim: #9a9086; --line: #36312b; --accent: #e08a5a; }
+}
+body { margin: 0; background: var(--bg); color: var(--ink);
+       font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 640px; margin: 0 auto; padding: 56px 20px; }
+h1 { margin: 0; font-size: 32px; }
+p { color: var(--dim); margin: 6px 0 28px; }
+a.card { display: block; background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+         padding: 16px 18px; margin-bottom: 12px; color: inherit; text-decoration: none; }
+a.card:hover { border-color: var(--accent); }
+a.card b { display: block; font-size: 17px; }
+a.card span { color: var(--dim); font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+<h1>prism</h1>
+<p>A Minecraft Java world as a 3D map in the browser, with the light baked in.</p>
+<a class="card" href="demo/"><b>Demo</b><span>A piece of a world, baked on its own, in the viewer.</span></a>
+<a class="card" href="app/"><b>Bake your own world</b><span>In the browser, nothing to install (Chrome or Edge). Your world never leaves your computer.</span></a>
+<a class="card" href="@REPO@"><b>Source</b><span>The code, how to build it and how to bake a world from the command line.</span></a>
+</main>
+</body>
+</html>

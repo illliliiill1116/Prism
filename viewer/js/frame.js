@@ -86,12 +86,13 @@ export function setupFrame(app) {
         p.set("at", r(controls.target));
         p.set("sun", String(Math.round(app.sunDeg * 10) / 10));
         if (app.flying) p.set("fly", "1");
+        if (app.walking) p.set("walk", "1");
         app.camParams(p);
         return p;
     }
     function saveView() {
         viewTimer = 0;
-        const key = [r(camera.position), r(controls.target), app.sunDeg.toFixed(1), app.flying, app.camKey()].join(";");
+        const key = [r(camera.position), r(controls.target), app.sunDeg.toFixed(1), app.flying, app.walking, app.camKey()].join(";");
         if (key === viewSaved || app.dead) return;
         viewSaved = key;
         if (app.onView) app.onView(view());

@@ -6,7 +6,12 @@
 #include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
 #include <sys/mman.h>
+#endif
+#ifndef O_BINARY
+#define O_BINARY 0 /* Windows: no newline translation */
+#endif
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -21,7 +26,7 @@ mca_result_t mca_region_open(const char *path, mca_region_t *region) {
     memset(region, 0, sizeof(*region));
     region->fd = -1;
 
-    int fd = open(path, O_RDONLY);
+    int fd = open(path, O_RDONLY | O_BINARY);
     if (fd < 0) return MCA_ERR_IO;
 
     struct stat st;
@@ -29,8 +34,20 @@ mca_result_t mca_region_open(const char *path, mca_region_t *region) {
     size_t len = (size_t)st.st_size;
     if (len < HEADER_SIZE) { close(fd); return MCA_ERR_TOO_SMALL; }
 
+#if defined(_WIN32) || defined(__EMSCRIPTEN__)
+    /* no mmap (Windows; the browser, whose files can't be mapped): the file read whole (a region file is a few MB, the jar tens) */
+    void *map = malloc(len ? len : 1);
+    size_t got = 0;
+    while (map && got < len) {
+        long r = read(fd, (char *)map + got, (unsigned)(len - got > (1u << 30) ? 1u << 30 : len - got));
+        if (r <= 0) break;
+        got += (size_t)r;
+    }
+    if (!map || got != len) { free(map); close(fd); return MCA_ERR_IO; }
+#else
     void *map = mmap(NULL, len, PROT_READ, MAP_PRIVATE, fd, 0);
     if (map == MAP_FAILED) { close(fd); return MCA_ERR_IO; }
+#endif
 
     region->fd = fd;
     region->map = (uint8_t *)map;
@@ -40,7 +57,11 @@ mca_result_t mca_region_open(const char *path, mca_region_t *region) {
 
 void mca_region_close(mca_region_t *region) {
     if (!region) return;
+#if defined(_WIN32) || defined(__EMSCRIPTEN__)
+    free(region->map);
+#else
     if (region->map) munmap(region->map, region->map_len);
+#endif
     if (region->fd >= 0) close(region->fd);
     memset(region, 0, sizeof(*region));
 }

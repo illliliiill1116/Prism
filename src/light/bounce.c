@@ -26,8 +26,8 @@ void setup_bounce(void) {
     const float golden = 2.39996323f;
     for (int i = 0; i < bounce_rays; i++) {
         float u = (i + 0.5f) / bounce_rays, r = sqrtf(u), phi = i * golden;
-        bounce_dirs[i][0] = r * cosf(phi);
-        bounce_dirs[i][1] = r * sinf(phi);
+        bounce_dirs[i][0] = r * dcosf(phi);
+        bounce_dirs[i][1] = r * dsinf(phi);
         bounce_dirs[i][2] = sqrtf(1 - u);
     }
     for (int k = 0; k < BOUNCE_ANGLES; k++) sun_at((k + 0.5f) * 3.14159265f / BOUNCE_ANGLES, bounce_sun[k]);

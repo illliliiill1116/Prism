@@ -7,6 +7,7 @@ Per region, `r.<x>.<z>/` holds:
 | `index.json` | The format, the tile list with quad counts, and where each tile is in `tiles.bin` |
 | `atlas.png` | Texture atlas |
 | `tiles.bin` | Every tile of the region |
+| `solid.bin` | What a walker bumps into, per tile (about 4% of `tiles.bin`) |
 
 `tiles.bin` starts with all the coarse tiles in one pack. Then, per tile,
 come the quads only level 0 has, the quads levels 0 and 1 share, and the
@@ -15,6 +16,13 @@ reads with an HTTP Range request. Getting closer downloads only the level 0
 remainder, since the shared part is already there. Each part is gzipped on
 its own. The format is documented where it is written (`tile_payload` and
 `write_tiles` in `src/tiles/tiles.c`) and decoded in `viewer/js/tile.js`.
+
+`solid.bin` holds, per block, the height each quarter of its floor is
+solid to, plus flags for water, lava and climbing, as a small palette and a
+byte per block per tile. The viewer reads only the tiles around the walker.
+It is optional: a region without it (`"solid"` missing from `index.json`)
+can still be viewed, just not walked. Written in `src/tiles/solid.c`, read
+in `viewer/js/walk.js`.
 
 `map.json` and every `index.json` carry the format number (`"format"`).
 The viewer refuses a map in a format it does not read and asks for a

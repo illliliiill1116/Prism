@@ -75,9 +75,13 @@ int tex_opaque(const canvas_t *t) {
     return !s->has_zero && !s->has_partial;
 }
 
+/* Tallest first, equal heights in slot order: qsort's order of equal
+ * elements differs between C libraries (glibc's keeps them, the browser
+ * build's doesn't), and the atlas must come out the same on all. */
 static int cmp_slot_h(const void *a, const void *b) {
     const texslot_t *x = *(texslot_t *const *)a, *y = *(texslot_t *const *)b;
-    return (int)y->h - (int)x->h;
+    if (x->h != y->h) return (int)y->h - (int)x->h;
+    return (x > y) - (x < y);
 }
 
 /* Shelf packing, tallest first, into a power-of-two atlas. */

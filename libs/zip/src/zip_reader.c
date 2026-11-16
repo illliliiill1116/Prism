@@ -5,7 +5,12 @@
 #include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
 #include <sys/mman.h>
+#endif
+#ifndef O_BINARY
+#define O_BINARY 0 /* Windows: no newline translation */
+#endif
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -39,15 +44,27 @@ zip_result_t zip_open(const char *path, zip_archive_t *archive) {
     memset(archive, 0, sizeof(*archive));
     archive->fd = -1;
 
-    int fd = open(path, O_RDONLY);
+    int fd = open(path, O_RDONLY | O_BINARY);
     if (fd < 0) return ZIP_ERR_IO;
 
     struct stat st;
     if (fstat(fd, &st) != 0) { close(fd); return ZIP_ERR_IO; }
     size_t len = (size_t)st.st_size;
 
+#if defined(_WIN32) || defined(__EMSCRIPTEN__)
+    /* no mmap (Windows; the browser, whose files can't be mapped): the file read whole (a region file is a few MB, the jar tens) */
+    void *map = malloc(len ? len : 1);
+    size_t got = 0;
+    while (map && got < len) {
+        long r = read(fd, (char *)map + got, (unsigned)(len - got > (1u << 30) ? 1u << 30 : len - got));
+        if (r <= 0) break;
+        got += (size_t)r;
+    }
+    if (!map || got != len) { free(map); close(fd); return ZIP_ERR_IO; }
+#else
     void *map = mmap(NULL, len, PROT_READ, MAP_PRIVATE, fd, 0);
     if (map == MAP_FAILED) { close(fd); return ZIP_ERR_IO; }
+#endif
 
     archive->fd = fd;
     archive->map = (uint8_t *)map;
@@ -99,7 +116,11 @@ zip_result_t zip_open(const char *path, zip_archive_t *archive) {
 void zip_close(zip_archive_t *archive) {
     if (!archive) return;
     free(archive->entries);
+#if defined(_WIN32) || defined(__EMSCRIPTEN__)
+    free(archive->map);
+#else
     if (archive->map) munmap(archive->map, archive->map_len);
+#endif
     if (archive->fd >= 0) close(archive->fd);
     memset(archive, 0, sizeof(*archive));
 }

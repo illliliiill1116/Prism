@@ -7,12 +7,26 @@
 #include "prism.h"
 #include <pthread.h>
 #include <sched.h>
-#include <unistd.h>
 
 void *xmalloc(size_t n) {
     void *p = malloc(n ? n : 1);
     if (!p) { fprintf(stderr, "out of memory (%zu bytes)\n", n); exit(1); }
     return p;
+}
+
+int clip_on, clip[5];
+static void clear_box(int x0, int z0, int x1, int z1, int ymin);
+
+/* "x0,z0,x1,z1,ymin" into clip, its corners put in order; 1 if it isn't */
+int parse_clip(const char *s) {
+    int c[5], n = 0;
+    if (sscanf(s, "%d,%d,%d,%d,%d%n", &c[0], &c[1], &c[2], &c[3], &c[4], &n) != 5 || s[n]) return 1;
+    if (c[4] < YMIN || c[4] >= YMIN + GH) return 1;
+    if (c[0] > c[2]) { int t = c[0]; c[0] = c[2]; c[2] = t; }
+    if (c[1] > c[3]) { int t = c[1]; c[1] = c[3]; c[3] = t; }
+    memcpy(clip, c, sizeof c);
+    clip_on = 1;
+    return 0;
 }
 
 int prism_open(const char *jar) {
@@ -116,7 +130,7 @@ static void load_region(const mca_region_t *r, int rrx, int rrz, int cmin_x, int
             J.n++;
         }
     atomic_store(&J.next, 0);
-    long nt = sysconf(_SC_NPROCESSORS_ONLN);
+    long nt = plat_ncpu();
     nt = nt < 1 ? 1 : nt > 64 ? 64 : nt;
     if (nt > J.n) nt = J.n;
     pthread_t th[64];
@@ -169,6 +183,8 @@ void window_load(const char *rdir, int c0x, int c0z, canvas_t *atlas, long *lit,
             for (int k = 0; k <= MCA_ERR_NBT; k++)
                 if (bad[k]) printf("warning: r.%d.%d.mca: %d chunks unreadable (%s), left empty\n", rrx, rrz, bad[k], mca_why(k));
         }
+    /* --clip: the box alone, lit as if nothing were around it */
+    if (clip_on) clear_box(clip[0], clip[1], clip[2], clip[3], clip[4]);
     size_t nvox = (size_t)GW * GW * GH;
     memset(occl, 0, (nvox + 63) / 64 * 8);
     memset(focc, 0, (nvox + 63) / 64 * 8);
@@ -218,12 +234,10 @@ void light_caches_clear(void) {
     if (!lcache || !fcache) { fprintf(stderr, "oom\n"); exit(1); }
 }
 
-/* Empties every column outside world x0..x1, z0..z1 (inclusive), and
- * inside them what is below ymin, after the light is worked out, so the
- * mesh ends there: the sides against those columns are drawn (the ground
- * cut open), while the light, shadows included, is still the whole
- * world's. coltop -1 marks them (see isodraw's cut walls). */
-void window_clear_outside(int x0, int z0, int x1, int z1, int ymin) {
+/* Every block outside world x0..x1, z0..z1 (inclusive), and inside them
+ * below ymin, emptied from the grid, and the chunks and rows left with
+ * nothing marked for mesh_pass to skip. */
+static void clear_box(int x0, int z0, int x1, int z1, int ymin) {
     int below = ymin - YMIN < 0 ? 0 : ymin - YMIN > GH ? GH : ymin - YMIN;
     /* the area's x span in grid cells, clamped; in the grid's own order */
     int ax0 = x0 - reg_x0, ax1 = x1 - reg_x0, az0 = z0 - reg_z0, az1 = z1 - reg_z0;
@@ -235,13 +249,21 @@ void window_clear_outside(int x0, int z0, int x1, int z1, int ymin) {
             memset(row, 0, (size_t)ax0 * sizeof *row);
             memset(row + ax1 + 1, 0, (size_t)(GW - 1 - ax1) * sizeof *row);
         }
-    for (int z = 0; z < GW; z++)
-        for (int x = 0; x < GW; x++)
-            if (z < az0 || z > az1 || x < ax0 || x > ax1) coltop[z * GW + x] = -1;
-    /* nothing left there to mesh */
     mesh_y0 = below;
     for (int c = 0; c < 32 * 32; c++) {
         int gx = MARGIN + c % 32 * 16, gz = MARGIN + c / 32 * 16;
         mesh_skip[c] = gx + 15 < ax0 || gx > ax1 || gz + 15 < az0 || gz > az1;
     }
+}
+
+/* window_clear_outside's box, after the light is worked out, so the mesh
+ * ends there: the sides against those columns are drawn (the ground cut
+ * open), while the light, shadows included, is still the whole world's.
+ * coltop -1 marks them (see isodraw's cut walls). */
+void window_clear_outside(int x0, int z0, int x1, int z1, int ymin) {
+    clear_box(x0, z0, x1, z1, ymin);
+    int ax0 = x0 - reg_x0, ax1 = x1 - reg_x0, az0 = z0 - reg_z0, az1 = z1 - reg_z0;
+    for (int z = 0; z < GW; z++)
+        for (int x = 0; x < GW; x++)
+            if (z < az0 || z > az1 || x < ax0 || x > ax1) coltop[z * GW + x] = -1;
 }

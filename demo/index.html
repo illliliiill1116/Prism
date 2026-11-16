@@ -1,0 +1,47 @@
+<!doctype html>
+<!-- The demo site's page: one piece of a world, cut out with prism map
+     --clip, in the viewer. scripts/demo.sh fills in the @...@ and puts it
+     next to the viewer and the map in build-demo/. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>@TITLE@ · prism</title>
+<link rel="stylesheet" href="style.css" data-prism>
+<style>
+html, body { margin: 0; height: 100%; overflow: hidden; background: #c3d0d8; }
+.cap { position: fixed; right: 16px; bottom: 16px; z-index: 5; max-width: calc(100% - 200px);
+       padding: 10px 14px; border-radius: 10px; background: rgba(20, 22, 26, .62); color: #f2efe9;
+       font: 13px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; backdrop-filter: blur(6px); }
+.cap b { font-size: 15px; }
+.cap span { opacity: .75; }
+.cap a { color: inherit; }
+</style>
+<script type="importmap">
+{ "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div class="cap"><b>@TITLE@</b><br>
+<span>@BOX@ · drag to turn, wheel to zoom, ? for help</span></div>
+<script type="module">
+import { createViewer, VIEW_KEYS } from "./js/viewer.js";
+/* the start view, unless the address has one (a shared link's) */
+const params = Object.fromEntries(new URLSearchParams(location.search));
+createViewer(document.body, {
+    cam: [@CAM@], at: [@AT@], sun: @SUN@,
+    ...params,
+    map: "map", keys: "page",
+    onView(view) {
+        const u = new URL(location.href), p = u.searchParams;
+        for (const k of VIEW_KEYS) if (view.has(k)) p.set(k, view.get(k)); else p.delete(k);
+        u.search = p.toString().replace(/%2C/g, ",");
+        try { history.replaceState(history.state, "", u); } catch {}
+    },
+});
+</script>
+</body>
+</html>

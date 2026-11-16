@@ -3,6 +3,9 @@
 #include <sched.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#ifdef _WIN32
+#include <malloc.h>
+#endif
 #include <string.h>
 
 #if defined(__x86_64__) || defined(__i386__)
@@ -34,7 +37,11 @@ int percpu_rwlock_init(percpu_rwlock_t *l, uint32_t nshards)
     /* aligned_alloc needs a size that is a multiple of 64, which the
      * padded shard is. */
     size_t bytes = (size_t)nshards * sizeof(percpu_rwlock_shard_t);
+#ifdef _WIN32 /* no aligned_alloc in its C library */
+    l->shards = (percpu_rwlock_shard_t *)_aligned_malloc(bytes, 64);
+#else
     l->shards = (percpu_rwlock_shard_t *)aligned_alloc(64, bytes);
+#endif
     if (!l->shards) return 0;
     memset(l->shards, 0, bytes);
     for (uint32_t i = 0; i < nshards; i++) {
@@ -48,7 +55,11 @@ int percpu_rwlock_init(percpu_rwlock_t *l, uint32_t nshards)
 void percpu_rwlock_destroy(percpu_rwlock_t *l)
 {
     if (!l || !l->shards) return;
+#ifdef _WIN32
+    _aligned_free(l->shards);
+#else
     free(l->shards);
+#endif
     l->shards = NULL;
     l->nshards = 0;
 }

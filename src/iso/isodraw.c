@@ -782,7 +782,10 @@ static const iso_t *sort_iso; /* qsort has no context; set once before the bands
 static int cmp_glass(const void *a, const void *b) {
     const iq_t *qa = &sort_iso->q[*(const uint32_t *)a >> 1], *qb = &sort_iso->q[*(const uint32_t *)b >> 1];
     float da = qa->d[0] + qa->d[2], db = qb->d[0] + qb->d[2];
-    return da < db ? -1 : da > db;
+    if (da != db) return da < db ? -1 : 1;
+    /* ties by id: the C libraries' qsorts order them differently */
+    uint32_t ia = *(const uint32_t *)a, ib = *(const uint32_t *)b;
+    return (ia > ib) - (ia < ib);
 }
 
 /* The band's nearest opaque or cut-out triangle and water per pixel, and

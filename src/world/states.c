@@ -143,6 +143,45 @@ static int is_plant(const char *bare) {
     return 0;
 }
 
+/* What a walker in the viewer bumps into (state_t coll): the model's boxes
+ * as the height each quarter of the floor is solid to, from the floor up (a
+ * top slab is a full block, a fence a block high). The game's own collision
+ * shapes live in its code, not the jar; this is near enough to walk by.
+ * Plants, signs, banners, buttons, plates, rails, torches, fire and portals
+ * are walked through, as in the game; ladders and vines are climbed. */
+static uint32_t collision_of(const state_t *s, const char *bare, const char *key) {
+    uint32_t c = s->fluid == FLUID_WATER ? COLL_WATER : s->fluid == FLUID_LAVA ? COLL_LAVA : 0;
+    if (s->air || s->fluid_block || !s->shape || !s->shape->element_count) return c;
+    if (tag_has("climbable", bare, 0)) c |= COLL_CLIMB;
+    if (name_is(bare, "snow")) {
+        int h = (prop_int(key, "layers=") - 1) * 2 * 15 / 16;
+        return h > 0 ? c | (uint32_t)h * 0x1111u : c;
+    }
+    if (s->up_lit || (c & COLL_CLIMB) || name_has(bare, "torch") || name_is(bare, "cobweb") ||
+        name_is(bare, "tripwire") || name_is(bare, "redstone_wire") || name_is(bare, "lever") ||
+        name_is(bare, "powder_snow") || name_is(bare, "end_portal"))
+        return c;
+    static const char *const through[] = { "replaceable", "all_signs", "banners", "buttons", "pressure_plates",
+                                           "rails", "fire", "portals", "flowers", "crops", "saplings" };
+    for (size_t i = 0; i < sizeof through / sizeof *through; i++)
+        if (tag_has(through[i], bare, 0)) return c;
+    if (!s->shape->full_cube && is_plant(bare)) return c;
+    float top[4] = { 0 };
+    for (uint32_t i = 0; i < s->shape->element_count; i++) {
+        const blockmodel_element_t *e = &s->shape->elements[i];
+        if (!(e->x1 > e->x0 && e->y1 > e->y0 && e->z1 > e->z0)) continue; /* a plane */
+        for (int q = 0; q < 4; q++) {
+            float qx0 = (q & 1) * 8, qz0 = (q >> 1) * 8;
+            if (e->x0 < qx0 + 8 && e->x1 > qx0 && e->z0 < qz0 + 8 && e->z1 > qz0) top[q] = fmaxf(top[q], (float)e->y1);
+        }
+    }
+    for (int q = 0; q < 4; q++) {
+        int h = (int)ceilf(fminf(top[q], 16) * 15 / 16 - 0.01f);
+        c |= (uint32_t)(h < 0 ? 0 : h) << (4 * q);
+    }
+    return c;
+}
+
 static int emission(const char *bare, const char *key) {
     static const struct { const char *name; uint8_t level; } E[] = {
         { "glowstone", 15 }, { "sea_lantern", 15 }, { "jack_o_lantern", 15 }, { "lantern", 15 },
@@ -357,6 +396,7 @@ static uint32_t intern_named(const nbt_pool_t *pool, const char *name, uint16_t 
                     name_is(bare, "player_head") || name_is(bare, "player_wall_head") || name_is(bare, "decorated_pot");
         int e = emission(bare, key);
         s->emit = (uint8_t)(e < 0 ? 0 : e > 15 ? 15 : e);
+        s->coll = collision_of(s, bare, key);
     }
     htab[h] = ++nstates;
     return nstates - 1;

@@ -22,9 +22,9 @@ static float sky_dirs[SKY_RAYS][3]; /* cosine-weighted around +y */
 #define SUN_TILT 0.2475f
 
 void sun_at(float th, float d[3]) {
-    d[0] = cosf(th);
-    d[1] = sinf(th) * cosf(SUN_TILT);
-    d[2] = -sinf(th) * sinf(SUN_TILT);
+    d[0] = dcosf(th);
+    d[1] = dsinf(th) * dcosf(SUN_TILT);
+    d[2] = -dsinf(th) * dsinf(SUN_TILT);
 }
 
 void normalize3(float v[3]) {
@@ -37,9 +37,9 @@ void setup_dirs(void) {
     for (int i = 0; i < SKY_RAYS; i++) {
         float u = (i + 0.5f) / SKY_RAYS;
         float r = sqrtf(u), phi = i * golden;
-        sky_dirs[i][0] = r * cosf(phi);
+        sky_dirs[i][0] = r * dcosf(phi);
         sky_dirs[i][1] = sqrtf(1 - u);
-        sky_dirs[i][2] = r * sinf(phi);
+        sky_dirs[i][2] = r * dsinf(phi);
     }
 }
 
@@ -544,7 +544,7 @@ static void bake(const float p[3], const float n[3], int leaf, float out[3], flo
             int y = oy;
             while (y + 1 < GH && states[gget(ox, y + 1, oz)].fluid == FLUID_WATER) y++;
             float depth = (float)y + states[gget(ox, y, oz)].fluid_h / 16.0f - o[1];
-            att = expf(-WATER_EXT * ((depth < 0 ? 0 : depth) + WATER_MIN_DEPTH));
+            att = dexpf(-WATER_EXT * ((depth < 0 ? 0 : depth) + WATER_MIN_DEPTH));
             asum += att;
             if (!wet++) {
                 biome_color_at(BC_WATER, o, wc);

@@ -15,9 +15,9 @@ uint8_t *bgrid;
 
 tint_ctx_t *tints;
 
-float lin_to_srgb(float c) { return c <= 0.0031308f ? c * 12.92f : 1.055f * powf(c, 1 / 2.4f) - 0.055f; }
+float lin_to_srgb(float c) { return c <= 0.0031308f ? c * 12.92f : 1.055f * dpowf(c, 1 / 2.4f) - 0.055f; }
 
-float srgb_to_lin(float c) { return c <= 0.04045f ? c / 12.92f : powf((c + 0.055f) / 1.055f, 2.4f); }
+float srgb_to_lin(float c) { return c <= 0.04045f ? c / 12.92f : dpowf((c + 0.055f) / 1.055f, 2.4f); }
 
 void rgb8_lin(const uint8_t c[3], float out[3]) {
     for (int i = 0; i < 3; i++) out[i] = srgb_to_lin(c[i] / 255.0f);

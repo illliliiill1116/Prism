@@ -3,7 +3,7 @@
  * lighting (sun visibility along its arc, sky, block and bounced light per
  * vertex), for the viewer in viewer/.
  *
- *   prism [bake] <client.jar> <world or region dir> <rx> <rz> <out dir> [threads] [glb]
+ *   prism [bake] <client.jar> <world or region dir> <rx> <rz> <out dir> [threads] [glb] [--clip x0,z0,x1,z1,ymin]
  *
  * rx/rz may be fractional, rounded to a chunk: -0.5 -0.5 is a region-sized
  * window centred on the world origin, where four regions meet.
@@ -47,20 +47,20 @@ int write_atomic(const char *path, const void *p, size_t n) {
     FILE *f = fopen(tmp, "wb");
     int bad = !f || fwrite(p, 1, n, f) != n;
     if (f && fclose(f)) bad = 1;
-    if (bad || rename(tmp, path)) { remove(tmp); return 1; }
+    if (bad || plat_rename(tmp, path)) { remove(tmp); return 1; }
     return 0;
 }
 
 static int write_atomic_png(const char *path, const canvas_t *img) {
     char tmp[4096];
     snprintf(tmp, sizeof tmp, "%s.tmp", path);
-    if (png_encode_to_file(tmp, img) != PNG_OK || rename(tmp, path)) { remove(tmp); return 1; }
+    if (png_encode_to_file(tmp, img) != PNG_OK || plat_rename(tmp, path)) { remove(tmp); return 1; }
     return 0;
 }
 
 int cmd_bake(int argc, char **argv) {
     if (argc < 6) {
-        fprintf(stderr, "usage: prism [bake] <client.jar> <world or region dir> <rx> <rz> <out dir> [threads] [glb]\n");
+        fprintf(stderr, "usage: prism [bake] <client.jar> <world or region dir> <rx> <rz> <out dir> [threads] [glb] [--clip x0,z0,x1,z1,ymin]\n");
         return 2;
     }
     const char *jar = argv[1], *out = argv[5];
@@ -72,7 +72,9 @@ int cmd_bake(int argc, char **argv) {
     int want_glb = 0;
     for (int i = 7; i < argc; i++) {
         if (strcmp(argv[i], "glb") == 0) want_glb = 1;
-        else { fprintf(stderr, "unknown option %s\n", argv[i]); return 2; }
+        else if (strcmp(argv[i], "--clip") == 0 && i + 1 < argc) {
+            if (parse_clip(argv[++i])) { fprintf(stderr, "--clip x0,z0,x1,z1,ymin (ymin -64..319)\n"); return 2; }
+        } else { fprintf(stderr, "unknown option %s\n", argv[i]); return 2; }
     }
     if (nthreads < 1) { fprintf(stderr, "threads: 1 or more\n"); return 2; }
     big_allocs_mapped();
@@ -119,7 +121,7 @@ int bake_region(const char *rdir, int c0x, int c0z, const char *out, int nthread
      * its buildings to it, so it follows the water down, never up */
     cave_y = sea_cols && sea - 7 < CAVE_Y ? sea - 7 : CAVE_Y;
     double t_load = now_s();
-    mkdir(out, 0755);
+    plat_mkdir(out);
     /* the atlas URL carries its content hash, so a browser never pairs a
      * new mesh with an old atlas from its cache */
     uint32_t atlas_hash = 2166136261u;
@@ -141,12 +143,14 @@ int bake_region(const char *rdir, int c0x, int c0z, const char *out, int nthread
      * of both levels, which share most. For the glb, level 0 at once. Then
      * level 2, small, for the whole region. */
     const int TW = 32 / TILE_CHUNKS, rows = want_glb ? TW : BAKE_BAND;
+    static uint8_t empty[32 * 32]; /* chunks --clip left nothing in */
+    memcpy(empty, mesh_skip, sizeof empty);
     for (int b0 = 0; b0 < TW + 1; b0 += b0 < TW ? rows : 1) {
         int coarse = b0 >= TW;
         if (b0) light_caches_clear();
         for (int c = 0; c < 32 * 32; c++) {
             int row = c / 32 / TILE_CHUNKS;
-            mesh_skip[c] = !coarse && (row < b0 || row >= b0 + rows);
+            mesh_skip[c] = empty[c] || (!coarse && (row < b0 || row >= b0 + rows));
         }
         for (int lod = coarse ? 2 : 0; lod < (coarse ? 3 : 2); lod++) {
             double t = now_s();
@@ -177,9 +181,16 @@ int bake_region(const char *rdir, int c0x, int c0z, const char *out, int nthread
     lcache = NULL;
     free(fcache);
     fcache = NULL;
-    size_t l2_len = l2.n;
+    size_t l2_len = l2.n, solid_len = 0;
     snprintf(path, sizeof path, "%s/" TILES_FILE, out);
     if (write_tiles(path, &l2, gzs, tile_at)) { fprintf(stderr, "can't write %s\n", path); return 1; }
+    {
+        bytes_t sol;
+        snprintf(path, sizeof path, "%s/" SOLID_FILE, out);
+        if (pack_solid(&sol, nthreads) || write_atomic(path, sol.p, sol.n)) { fprintf(stderr, "can't write %s\n", path); return 1; }
+        solid_len = sol.n;
+        free(sol.p);
+    }
     snprintf(path, sizeof path, "%s/atlas.png", out);
     if (write_atomic_png(path, &atlas)) { fprintf(stderr, "can't write %s\n", path); return 1; }
 
@@ -197,8 +208,8 @@ int bake_region(const char *rdir, int c0x, int c0z, const char *out, int nthread
     clock_gettime(CLOCK_REALTIME, &ts);
     uint32_t ver = atlas_hash ^ fnv((const char *)&ts, sizeof ts);
     sappend(&idx, "{\"format\":%d,\"origin\":[%d,%d],\"atlas\":\"atlas.png?%08x\",\"ver\":\"%08x\",\"baked\":%lld,"
-            "\"sea\":[%d,%ld],\"tile\":%d,\"l2\":[0,%zu],\"tiles\":[", MAP_FORMAT, reg_x0 + MARGIN + REG / 2,
-            reg_z0 + MARGIN + REG / 2, atlas_hash, ver, (long long)baked, sea, sea_cols, TILE_CHUNKS * 16, l2_len);
+            "\"sea\":[%d,%ld],\"solid\":%zu,\"tile\":%d,\"l2\":[0,%zu],\"tiles\":[", MAP_FORMAT, reg_x0 + MARGIN + REG / 2,
+            reg_z0 + MARGIN + REG / 2, atlas_hash, ver, (long long)baked, sea, sea_cols, solid_len, TILE_CHUNKS * 16, l2_len);
     int first = 1;
     for (int t = 0; t < NTILES; t++) {
         if (!tile_quads[0][t] && !tile_quads[1][t] && !tile_quads[2][t]) continue;
