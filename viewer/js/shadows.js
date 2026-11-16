@@ -159,11 +159,18 @@ export function setupShadows(app) {
         if (!b.H) for (const sl of rayMaps) sl.deg = NaN;
         if (!(b.H && Math.abs(c.x - b.x) + need <= b.H && Math.abs(c.y - b.y) + need <= b.H &&
               b.H <= need * SHADOW_SLACK * SHADOW_SLACK && Math.abs(y0 - shadowY0) < 16)) {
-            if (y0 !== shadowY0) { shadowY0 = y0; lightUV(controls.target, c); }
+            /* onto the new plane: u = x - (y - y0) kx grows by kx a block of y0 */
+            if (y0 !== shadowY0) {
+                c.x += (y0 - shadowY0) * sunShear.x; c.y += (y0 - shadowY0) * sunShear.y;
+                shadowY0 = y0;
+            }
             const H = need * SHADOW_SLACK, texel = 2 * H / SHADOW_SIZE;
-            /* whole texels, so a redrawn map's edges land where the last one's did */
-            c.x = Math.round(c.x / texel) * texel;
-            c.y = Math.round(c.y / texel) * texel;
+            /* whole texels in the world, not on the plane: an edge is where
+               x - y kx = b.x - y0 kx + n texel, so a redrawn map's edges land
+               where the last one's did also when y0 moved (flying up or down) */
+            const ox = sunShear.x * shadowY0, oy = sunShear.y * shadowY0;
+            c.x = Math.round((c.x - ox) / texel) * texel + ox;
+            c.y = Math.round((c.y - oy) / texel) * texel + oy;
             Object.assign(b, { x: c.x, y: c.y, H });
             shadowU.uShadowTexel.value = texel;
             for (const sl of shadowSlots) if (sl) sl.deg = NaN;
