@@ -292,7 +292,7 @@ static int name_eq(const char *name, uint16_t len, const char *lit)
 static int is_grass_tinted(const char *block, uint16_t len) {
     static const char *const grass[] = {
         "minecraft:grass_block", "minecraft:short_grass", "minecraft:fern",
-        "minecraft:tall_grass", "minecraft:large_fern", "minecraft:potted_fern",
+        "minecraft:tall_grass", "minecraft:large_fern", "minecraft:potted_fern", "minecraft:bush",
         "minecraft:sugar_cane", "minecraft:bamboo",
         "minecraft:melon_stem", "minecraft:pumpkin_stem",
         "minecraft:attached_melon_stem", "minecraft:attached_pumpkin_stem",

@@ -191,6 +191,8 @@ static int emission(const char *bare, const char *key) {
         { "copper_bulb", 15 }, { "exposed_copper_bulb", 12 }, { "weathered_copper_bulb", 8 },
         { "oxidized_copper_bulb", 4 }, { "torch", 14 }, { "wall_torch", 14 }, { "end_rod", 14 },
         { "furnace", 13 }, { "blast_furnace", 13 }, { "smoker", 13 }, { "nether_portal", 11 },
+        { "copper_lantern", 15 }, { "exposed_copper_lantern", 15 }, { "weathered_copper_lantern", 15 },
+        { "oxidized_copper_lantern", 15 }, { "copper_torch", 14 }, { "copper_wall_torch", 14 },
         { "soul_torch", 10 }, { "soul_wall_torch", 10 }, { "soul_lantern", 10 }, { "soul_fire", 10 },
         { "soul_campfire", 10 }, { "crying_obsidian", 10 }, { "redstone_ore", 9 },
         { "deepslate_redstone_ore", 9 }, { "enchanting_table", 7 }, { "ender_chest", 7 },
