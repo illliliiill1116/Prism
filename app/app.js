@@ -7,7 +7,7 @@ const T = {
     maps: "Your maps", worlds: "Bake a world", noMaps: "No maps yet. Pick a world below to start.",
     noWorlds: "No saves found in:", mcAt: "Minecraft folder:", regions: "regions", version: "version",
     open: "Open", update: "Update", folder: "Folder", notReady: "not baked yet",
-    range: "Area", near1: "3×3 regions around spawn", near2: "5×5 regions around spawn", near4: "9×9 regions around spawn", all: "The whole world",
+    near1: "3×3 regions around spawn", near2: "5×5 regions around spawn", near4: "9×9 regions around spawn", all: "The whole world",
     game: "Textures from game version", start: "Bake", about: "about", min: "min", sec: "s", busy: "Another map is baking",
     baking: "Baking", of: "/", left: "about", cancel: "Cancel", done: "Done", failed: "The bake failed",
     cancelled: "Cancelled", log: "Log", someFailed: "regions failed", mb: "MB", gb: "GB",
@@ -20,6 +20,13 @@ const T = {
     dropAgain: "To update it, drop this world's folder here again.",
     webFoot: "Minecraft's textures belong to Mojang; prism is not affiliated with Mojang. Maps are kept in this browser.",
     noWeb: "This browser can't bake in the page (it needs a recent Chrome or Edge).",
+    chooseArea: "Choose an area…", orRegions: "Or bake whole regions:",
+    pickTitle: "Choose an area of", pickHint: "Drag from one corner of an area to the other; then drag its handles to resize it or inside it to move it · right-drag or two fingers to move the map · wheel to zoom",
+    pickBig: "a big area: it takes a while", drawing: "Drawing the map", cut: "Cut the ground at y", cutHint: "Nothing under this height is baked",
+    export: "Export", exporting: "Exporting", del: "Delete",
+    delAsk: "Delete the map of {name}? This can't be undone. The world itself is not touched.",
+    folderHint: "Show the map's files on this computer",
+    exportHint: "Download the map as a website (a zip): unzip it on any web host, or serve the folder, and open index.html",
 };
 
 const $ = (id) => document.getElementById(id);
@@ -51,9 +58,14 @@ function serverBackend() {
         bake: (b) => call("bake", b),
         cancel: () => call("cancel"),
         open: (id) => call("open", { map: id }),
+        remove: (id) => call("delete", { map: id }),
+        regions: (w) => fetch("api/regions?w=" + encodeURIComponent(w)).then((r) => r.json()),
+        overview: (w, jar, rx, rz) => fetch(`api/overview?w=${encodeURIComponent(w)}&jar=${encodeURIComponent(jar)}&r=${rx},${rz}`).then((r) => r.json()),
         iconUrl: (w) => "api/icon?w=" + encodeURIComponent(w.id),
         mapUrl: (id) => "viewer/?map=" + encodeURIComponent("/maps/" + id + "/"),
         logUrl: (id) => "maps/" + encodeURIComponent(id) + ".log",
+        mapBase: (id) => "maps/" + encodeURIComponent(id) + "/",
+        viewerFiles: () => fetch("api/viewer-files").then((r) => r.json()),
         canOpenFolder: true,
     };
 }
@@ -113,7 +125,7 @@ function drawJob() {
                 el("button", { onclick: () => backend.cancel().then(refresh) }, T.cancel)));
     } else {
         const row = el("div", { className: "row" });
-        if (!j.code && !j.cancelled) row.append(el("a", { className: "btn go", href: backend.mapUrl(j.map) }, T.open));
+        if (!j.code && !j.cancelled) row.append(el("a", { className: "btn go", href: backend.mapUrl(j.map), target: "_blank" }, T.open));
         if (j.failed) row.append(el("span", { className: "bad" }, `${j.failed} ${T.someFailed}`));
         if ((j.code || j.failed) && backend.logUrl(j.map)) row.append(el("a", { className: "btn", href: backend.logUrl(j.map), target: "_blank" }, T.log));
         box.append(row);
@@ -126,21 +138,61 @@ function drawMaps() {
     box.replaceChildren();
     if (!state.maps.length) { box.append(el("p", { className: "empty" }, T.noMaps)); return; }
     for (const m of state.maps) {
-        const w = state.worlds.find((w) => w.id === m.id);
+        const w = state.worlds.find((w) => w.id === (m.settings && m.settings.world || m.id));
+        const clip = m.settings && m.settings.clip;
+        const where = clip ? ` · x ${clip[0]}…${clip[2]}, z ${clip[1]}…${clip[3]}` : "";
         const meta = m.ready ? `${m.regions} ${T.regions} · ${size(m.bytes)} · ${new Date(m.baked * 1000).toLocaleDateString()}` : T.notReady;
         const row = el("div", { className: "row" });
-        if (m.ready) row.append(el("a", { className: "btn go", href: backend.mapUrl(m.id) }, T.open));
+        if (m.ready) row.append(el("a", { className: "btn go", href: backend.mapUrl(m.id), target: "_blank" }, T.open));
         if (m.settings && w) row.append(el("button", {
             disabled: busy, onclick: () => backend.bake(m.settings).then(refresh),
         }, T.update));
         else if (m.settings && state.web) row.append(el("span", { className: "meta", title: T.dropAgain }, T.dropAgain));
-        if (backend.canOpenFolder) row.append(el("button", { onclick: () => backend.open(m.id) }, T.folder));
+        if (m.ready) row.append(exportButton(m, (w ? w.name : (m.settings && m.settings.name) || m.id) + (clip ? ` (${clip[0]},${clip[1]})` : "")));
+        if (backend.canOpenFolder) row.append(el("button", { title: T.folderHint, onclick: () => backend.open(m.id) }, T.folder));
+        const name = w ? w.name : (m.settings && m.settings.name) || m.id;
+        const baking = busy && state.job.map === m.id;
+        row.append(el("button", {
+            className: "del", disabled: baking, onclick: async () => {
+                if (!confirm(T.delAsk.replace("{name}", name))) return;
+                const r = await backend.remove(m.id);
+                if (r && r.error) alert(r.error);
+                else (await import("./export.js")).forgetView(backend.mapBase(m.id));
+                refresh();
+            },
+        }, T.del));
         box.append(el("div", { className: "card" },
             el("div", { className: "top" }, icon(w),
                 el("div", { style: "min-width:0" }, el("div", { className: "name", title: m.id }, w ? w.name : (m.settings && m.settings.name) || m.id),
-                    el("div", { className: "meta" }, meta))),
+                    el("div", { className: "meta" }, meta + where))),
             row));
     }
+}
+
+/* Export: the map as a site in a zip, downloaded (export.js) */
+function exportButton(m, name) {
+    const b = el("button", { title: T.exportHint }, T.export);
+    b.onclick = async () => {
+        b.disabled = true;
+        try {
+            const { exportSite, lastView } = await import("./export.js");
+            const zip = await exportSite({
+                map: backend.mapBase(m.id), viewer: "viewer/", files: await backend.viewerFiles(), title: name,
+                start: lastView(backend.mapBase(m.id)),
+                progress: (f) => { b.textContent = `${T.exporting} ${Math.round(f * 100)}%`; },
+            });
+            const a = el("a", { href: URL.createObjectURL(zip), download: (name.replace(/[\\/:*?"<>|]+/g, "_").trim() || "map") + ".zip" });
+            document.body.append(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+        } catch (e) {
+            alert(String(e && e.message || e));
+        }
+        b.textContent = T.export;
+        b.disabled = false;
+    };
+    return b;
 }
 
 function icon(w) {
@@ -178,7 +230,7 @@ function options(w) {
     let near = choices[0][0];
     const est = el("span", { className: "meta" });
     const showEst = () => { est.textContent = `${T.about} ${dur(count(near) * perRegion(state.cpus))}`; };
-    const radios = el("div", {}, el("div", { className: "meta" }, T.range));
+    const radios = el("div", {});
     for (const [r, label] of choices) {
         const input = el("input", { type: "radio", name: "near-" + w.id, checked: r === near, onchange: () => { near = r; showEst(); } });
         radios.append(el("label", {}, input, `${label} (${count(r)})`));
@@ -198,14 +250,29 @@ function options(w) {
         });
     };
     showEst();
+    /* an area, picked on the world's picture (picker.js): the way in */
+    const pick = el("button", { className: "go", disabled: busy }, busy ? T.busy : T.chooseArea);
+    pick.onclick = async () => {
+        const { openPicker } = await import("./picker.js");
+        openPicker({
+            backend, world: w, jar: sel.value || w.version, T,
+            estimate: (n) => dur(n * perRegion(state.cpus)),
+            onBake: (clip) => backend.bake({ world: w.id, jar: sel.value || w.version, clip }).then((r) => {
+                if (r && r.error) alert(r.error);
+                openWorld = null;
+                refresh();
+            }),
+        });
+    };
+    go.className = "";
     /* in the browser, the world's own version, downloaded when needed */
     if (state.web) {
         const v = w.version || "?", have = state.jars.some((j) => j.ver === w.version);
         sel.replaceChildren(el("option", { value: w.version }, v));
-        opts.append(radios, el("div", { className: "meta" }, (have ? T.jarHave : T.jarWeb).replace("{v}", v)));
-    } else opts.append(radios, el("label", {}, T.game, sel));
+        opts.append(el("div", { className: "meta" }, (have ? T.jarHave : T.jarWeb).replace("{v}", v)));
+    } else opts.append(el("label", {}, T.game, sel));
     if (state.mem >= 0 && state.mem < 1800) opts.append(el("div", { className: "meta bad" }, T.lowMem));
-    opts.append(el("div", { className: "row" }, go, est));
+    opts.append(el("div", { className: "row" }, pick), el("div", { className: "meta" }, T.orRegions), radios, el("div", { className: "row" }, go, est));
     return opts;
 }
 

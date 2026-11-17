@@ -16,6 +16,7 @@ static inline int coarse_solid(int x, int y, int z) {
 
 /* What a block contributes to a cell: solid (coarse_solid, or a cave), water, or neither. */
 static inline int fine_kind(int x, int y, int z) {
+    if (mesh_y0 && y < mesh_y0) return 0; /* cut away (--clip) */
     if (y < 0) return 1;
     if (y >= GH) return 0;
     if (coarse_solid(x, y, z) || is_cave(x, y, z)) return 1;

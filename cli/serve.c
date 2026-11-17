@@ -19,9 +19,11 @@
  * The page: / (app/), the viewer at /viewer/, the maps at /maps/ (Range
  * requests, as the viewer reads tiles), and its calls at /api/: GET state
  * (worlds, game versions, maps, the bake under way), GET icon?w= (a
- * world's icon.png), POST bake {world, jar, near}, POST cancel, POST open
- * {map} (its folder in the file manager). A POST must carry X-Prism: 1 (a
- * page elsewhere can't send that without asking first, which this server
+ * world's icon.png), GET viewer-files (the viewer's scripts, for the
+ * page's Export), GET regions?w= and overview?w=&jar=&r= (the area
+ * picker's), POST bake {world, jar, near | clip}, POST cancel, POST open
+ * {map} (its folder in the file manager), POST delete {map}. A POST must
+ * carry X-Prism: 1 (a page elsewhere can't send that without asking first, which this server
  * never allows) and every request a Host of this server's own (so no other
  * name can be made to point here).
  */
@@ -71,6 +73,8 @@ static void job_lock(void) { while (atomic_flag_test_and_set_explicit(&job_busy,
 static void job_unlock(void) { atomic_flag_clear_explicit(&job_busy, memory_order_release); }
 
 /* -------- small helpers -------- */
+
+static int query_get(const char *q, const char *key, char *out, size_t len);
 
 static long long file_size(const char *path, time_t *mtime) {
     struct stat st;
@@ -296,15 +300,22 @@ static void api_state(str_t *o) {
     sappend(o, "}");
 }
 
-/* POST bake {world, jar, near}: near is a radius in regions around the
- * spawn, or -1 for all of the world */
+/* POST bake {world, jar, near} or {world, jar, clip}: near is a radius in
+ * regions around the spawn, or -1 for all of the world; clip, [x0, z0, x1,
+ * z1, ymin], an area of it (prism map --clip), a map of its own */
 static int api_bake(const char *body, size_t len, str_t *o) {
     json_pool_t pool;
     json_pool_init(&pool);
     json_value_t *root, *v;
     char world_id[512] = "", jar_ver[256] = "";
-    int radius = -1;
+    int radius = -1, clip[5], nclip = 0;
     if (json_parse(&pool, body, len, &root) == JSON_OK && root->type == JSON_OBJECT) {
+        if ((v = json_object_getz(&pool, root, "clip")) && v->type == JSON_ARRAY && json_array_count(v) == 5)
+            for (nclip = 0; nclip < 5; nclip++) {
+                json_value_t *e = json_array_at(&pool, v, (uint32_t)nclip);
+                if (e->type != JSON_NUMBER) break;
+                clip[nclip] = (int)e->number;
+            }
         if ((v = json_object_getz(&pool, root, "world")) && v->type == JSON_STRING)
             snprintf(world_id, sizeof world_id, "%.*s", (int)v->string.len, v->string.ptr);
         if ((v = json_object_getz(&pool, root, "jar")) && v->type == JSON_STRING)
@@ -313,18 +324,29 @@ static int api_bake(const char *body, size_t len, str_t *o) {
     }
     json_pool_free(&pool);
     if (!good_name(world_id) || !good_name(jar_ver)) { sappend(o, "{\"error\":\"bad world or version\"}"); return 400; }
+    if (nclip && nclip != 5) { sappend(o, "{\"error\":\"bad area\"}"); return 400; }
+    /* an area of a world is a map of its own, named after it (app.js's areaId) */
+    char map_id[600], clipArg[96] = "";
+    if (nclip) {
+        if (clip[0] > clip[2]) { int t = clip[0]; clip[0] = clip[2]; clip[2] = t; }
+        if (clip[1] > clip[3]) { int t = clip[1]; clip[1] = clip[3]; clip[3] = t; }
+        snprintf(clipArg, sizeof clipArg, "%d,%d,%d,%d,%d", clip[0], clip[1], clip[2], clip[3], clip[4]);
+        snprintf(map_id, sizeof map_id, "%s %d,%d to %d,%d", world_id, clip[0], clip[1], clip[2], clip[3]);
+    } else snprintf(map_id, sizeof map_id, "%s", world_id);
+    if (!good_name(map_id)) { sappend(o, "{\"error\":\"bad world\"}"); return 400; }
 
     char world[4096], jar[4096], out[4096], log[4096], pj[4096];
     snprintf(world, sizeof world, "%s/saves/%s", mc_dir, world_id);
     snprintf(jar, sizeof jar, "%s/versions/%s/%s.jar", mc_dir, jar_ver, jar_ver);
-    snprintf(out, sizeof out, "%s/%s", maps_dir, world_id);
-    snprintf(log, sizeof log, "%s/%s.log", maps_dir, world_id);
+    snprintf(out, sizeof out, "%s/%s", maps_dir, map_id);
+    snprintf(log, sizeof log, "%s/%s.log", maps_dir, map_id);
     if (!plat_is_dir(world) || file_size(jar, NULL) <= 0) { sappend(o, "{\"error\":\"no such world or version\"}"); return 404; }
     level_t lv = { 0 };
     read_level(world, &lv);
     char nearArg[64];
     snprintf(nearArg, sizeof nearArg, "%d,%d,%d", lv.spawn_x, lv.spawn_z, radius);
-    const char *argv[] = { "prism", "map", jar, world, out, radius >= 0 ? "--near" : NULL, nearArg, NULL };
+    const char *argv[] = { "prism", "map", jar, world, out, nclip ? "--clip" : radius >= 0 ? "--near" : NULL,
+                           nclip ? clipArg : nearArg, NULL };
 
     job_lock();
     if (job.running) { job_unlock(); sappend(o, "{\"error\":\"a bake is under way\"}"); return 409; }
@@ -334,7 +356,9 @@ static int api_bake(const char *body, size_t len, str_t *o) {
     json_str(&s, world_id);
     sappend(&s, ",\"jar\":");
     json_str(&s, jar_ver);
-    sappend(&s, ",\"near\":%d}\n", radius);
+    sappend(&s, ",\"near\":%d", nclip ? -1 : radius);
+    if (nclip) sappend(&s, ",\"clip\":[%s]", clipArg);
+    sappend(&s, "}\n");
     snprintf(pj, sizeof pj, "%s/prism.json", out);
     write_atomic(pj, s.p, s.n);
     free(s.p);
@@ -345,12 +369,91 @@ static int api_bake(const char *body, size_t len, str_t *o) {
         job.code = 0;
         job.cancelled = 0;
         job.started = time(NULL);
-        snprintf(job.map, sizeof job.map, "%s", world_id);
+        snprintf(job.map, sizeof job.map, "%s", map_id);
         snprintf(job.log, sizeof job.log, "%s", log);
     }
     job_unlock();
     if (rc) { sappend(o, "{\"error\":\"can't start prism\"}"); return 500; }
     sappend(o, "{\"ok\":true}");
+    return 200;
+}
+
+/* GET regions?w=: the world's region files, [[rx, rz], ...] (the
+ * picker's, see app/picker.js) */
+static int api_regions(const char *w, str_t *o) {
+    char world[4096], rdir[4096];
+    if (!good_name(w)) { sappend(o, "{\"error\":\"bad world\"}"); return 400; }
+    snprintf(world, sizeof world, "%s/saves/%s", mc_dir, w);
+    region_dir(world, rdir, sizeof rdir);
+    DIR *d = opendir(rdir);
+    if (!d) { sappend(o, "{\"error\":\"no such world\"}"); return 404; }
+    sappend(o, "{\"regions\":[");
+    int n = 0, rx, rz, len;
+    for (struct dirent *e; (e = readdir(d));) {
+        char path[4096];
+        snprintf(path, sizeof path, "%s/%s", rdir, e->d_name);
+        if (sscanf(e->d_name, "r.%d.%d.mca%n", &rx, &rz, &len) == 2 && !e->d_name[len] && file_size(path, NULL) > 0)
+            sappend(o, "%s[%d,%d]", n++ ? "," : "", rx, rz);
+    }
+    closedir(d);
+    sappend(o, "]}");
+    return 200;
+}
+
+/* One prism overview at a time: each takes a bake's memory */
+static atomic_flag ov_busy = ATOMIC_FLAG_INIT;
+
+/* GET overview?w=&jar=&r=rx,rz: a region's picture (prism overview), made
+ * when there is none newer than the region file and prism, kept under
+ * <data>/overviews/<world>/<version>/; its json with "png", the picture's
+ * URL, added. */
+static int api_overview(const char *q, str_t *o) {
+    char w[512], ver[256], rs[64], world[4096], rdir[4096], jar[4096], dir[4096], js[4096], mca[4096];
+    int rx, rz;
+    if (!query_get(q, "w", w, sizeof w) || !good_name(w) || !query_get(q, "jar", ver, sizeof ver) || !good_name(ver) ||
+        !query_get(q, "r", rs, sizeof rs) || sscanf(rs, "%d,%d", &rx, &rz) != 2) {
+        sappend(o, "{\"error\":\"bad request\"}");
+        return 400;
+    }
+    snprintf(world, sizeof world, "%s/saves/%s", mc_dir, w);
+    region_dir(world, rdir, sizeof rdir);
+    snprintf(mca, sizeof mca, "%s/r.%d.%d.mca", rdir, rx, rz);
+    snprintf(jar, sizeof jar, "%s/versions/%s/%s.jar", mc_dir, ver, ver);
+    time_t reg_t, js_t;
+    if (file_size(mca, &reg_t) <= 0 || file_size(jar, NULL) <= 0) { sappend(o, "{\"error\":\"no such region or version\"}"); return 404; }
+    snprintf(dir, sizeof dir, "%s/overviews/%s/%s", data_dir, w, ver);
+    snprintf(js, sizeof js, "%s/r.%d.%d.json", dir, rx, rz);
+    if (file_size(js, &js_t) <= 0 || js_t <= reg_t || (long long)js_t <= plat_self_mtime()) {
+        while (atomic_flag_test_and_set_explicit(&ov_busy, memory_order_acquire)) plat_sleep_ms(50);
+        char sub[4096], log[4096], sx[16], sz[16];
+        snprintf(sub, sizeof sub, "%s/overviews", data_dir);
+        plat_mkdir(sub);
+        snprintf(sub, sizeof sub, "%s/overviews/%s", data_dir, w);
+        plat_mkdir(sub);
+        plat_mkdir(dir);
+        snprintf(log, sizeof log, "%s/r.%d.%d.log", dir, rx, rz);
+        snprintf(sx, sizeof sx, "%d", rx);
+        snprintf(sz, sizeof sz, "%d", rz);
+        const char *argv[] = { "prism", "overview", jar, world, dir, sx, sz, NULL };
+        plat_proc_t p;
+        int rc = plat_proc_start(&p, argv, log) || plat_proc_wait(&p);
+        atomic_flag_clear_explicit(&ov_busy, memory_order_release);
+        if (rc || file_size(js, &js_t) <= 0) { sappend(o, "{\"error\":\"can't draw it\"}"); return 500; }
+        remove(log);
+    }
+    FILE *f = fopen(js, "rb");
+    char text[512] = "";
+    size_t n = f ? fread(text, 1, sizeof text - 1, f) : 0;
+    if (f) fclose(f);
+    text[n] = 0;
+    char *end = strrchr(text, '}');
+    if (!end) { sappend(o, "{\"error\":\"can't read it\"}"); return 500; }
+    *end = 0;
+    sappend(o, "%s,\"png\":", text);
+    char url[1024];
+    snprintf(url, sizeof url, "overviews/%s/%s/r.%d.%d.png?%lld", w, ver, rx, rz, (long long)js_t);
+    json_str(o, url);
+    sappend(o, "}");
     return 200;
 }
 
@@ -362,15 +465,21 @@ static int api_cancel(str_t *o) {
     return 200;
 }
 
-static int api_open(const char *body, size_t len, str_t *o) {
+/* A call's {map}: into id, "" when it has none */
+static void body_map(const char *body, size_t len, char id[512]) {
     json_pool_t pool;
     json_pool_init(&pool);
     json_value_t *root, *v;
-    char id[512] = "";
+    id[0] = 0;
     if (json_parse(&pool, body, len, &root) == JSON_OK && root->type == JSON_OBJECT &&
         (v = json_object_getz(&pool, root, "map")) && v->type == JSON_STRING)
-        snprintf(id, sizeof id, "%.*s", (int)v->string.len, v->string.ptr);
+        snprintf(id, 512, "%.*s", (int)v->string.len, v->string.ptr);
     json_pool_free(&pool);
+}
+
+static int api_open(const char *body, size_t len, str_t *o) {
+    char id[512];
+    body_map(body, len, id);
     char dir[4096];
     if (id[0] && !good_name(id)) { sappend(o, "{\"error\":\"bad map\"}"); return 400; }
     snprintf(dir, sizeof dir, "%s%s%s", maps_dir, id[0] ? "/" : "", id);
@@ -379,6 +488,27 @@ static int api_open(const char *body, size_t len, str_t *o) {
 #endif
     if (!plat_is_dir(dir)) { sappend(o, "{\"error\":\"no such map\"}"); return 404; }
     plat_open(dir);
+    sappend(o, "{\"ok\":true}");
+    return 200;
+}
+
+/* POST delete {map}: the map's folder and its bake's log, gone (the
+ * world is not touched); not while it is being baked. */
+static int api_delete(const char *body, size_t len, str_t *o) {
+    char id[512];
+    body_map(body, len, id);
+    if (!id[0] || !good_name(id) || !strcmp(id, "skins")) { sappend(o, "{\"error\":\"bad map\"}"); return 400; }
+    char dir[4096], log[4096];
+    snprintf(dir, sizeof dir, "%s/%s", maps_dir, id);
+    snprintf(log, sizeof log, "%s/%s.log", maps_dir, id);
+    if (!plat_is_dir(dir)) { sappend(o, "{\"error\":\"no such map\"}"); return 404; }
+    job_lock();
+    if (job.running && !strcmp(job.map, id)) { job_unlock(); sappend(o, "{\"error\":\"it is being baked\"}"); return 409; }
+    if (!strcmp(job.map, id)) job.map[0] = 0; /* its bake's box goes too */
+    job_unlock();
+    plat_rmtree(dir);
+    remove(log);
+    if (plat_is_dir(dir)) { sappend(o, "{\"error\":\"can't delete it all (a file in use?)\"}"); return 500; }
     sappend(o, "{\"ok\":true}");
     return 200;
 }
@@ -564,6 +694,27 @@ static int serve_static(conn_t *c, const req_t *r, const char *rel, int head) {
     return respond(c, 404, "text/plain", "not found", 9, NULL, head);
 }
 
+/* The viewer's scripts, as a JSON list of paths under viewer/: what the
+ * app's Export puts in a map's site (app/export.js). */
+static void api_viewer_files(str_t *o) {
+    sappend(o, "[");
+    int n = 0;
+    if (www_dir[0]) {
+        char dir[4096];
+        snprintf(dir, sizeof dir, "%s/viewer/js", www_dir);
+        DIR *d = opendir(dir);
+        for (struct dirent *e; d && (e = readdir(d));) {
+            size_t len = strlen(e->d_name);
+            if (len > 3 && !strcmp(e->d_name + len - 3, ".js") && good_name(e->d_name))
+                sappend(o, "%s\"js/%s\"", n++ ? "," : "", e->d_name);
+        }
+        if (d) closedir(d);
+    } else
+        for (const embedded_t *e = embedded; e->path; e++)
+            if (!strncmp(e->path, "viewer/js/", 10)) sappend(o, "%s\"%s\"", n++ ? "," : "", e->path + 7);
+    sappend(o, "]");
+}
+
 static int handle(conn_t *c, req_t *r, const char *body) {
     int head = !strcmp(r->method, "HEAD"), get = head || !strcmp(r->method, "GET"), post = !strcmp(r->method, "POST");
     /* only our own name: see the top */
@@ -579,6 +730,11 @@ static int handle(conn_t *c, req_t *r, const char *body) {
         int code = 200;
         if (post && strcmp(r->xprism, "1")) code = 403, sappend(&o, "{\"error\":\"forbidden\"}");
         else if (get && !strcmp(path, "/api/state")) api_state(&o);
+        else if (get && !strcmp(path, "/api/viewer-files")) api_viewer_files(&o);
+        else if (get && !strcmp(path, "/api/regions")) {
+            char w[512];
+            code = query_get(r->query, "w", w, sizeof w) ? api_regions(w, &o) : (sappend(&o, "{\"error\":\"bad world\"}"), 400);
+        } else if (get && !strcmp(path, "/api/overview")) code = api_overview(r->query, &o);
         else if (get && !strcmp(path, "/api/icon")) {
             char w[512], p[4096];
             if (!query_get(r->query, "w", w, sizeof w) || !good_name(w)) return respond(c, 400, "text/plain", "bad world", 9, NULL, head);
@@ -587,6 +743,7 @@ static int handle(conn_t *c, req_t *r, const char *body) {
         } else if (post && !strcmp(path, "/api/bake")) code = api_bake(body, (size_t)r->clen, &o);
         else if (post && !strcmp(path, "/api/cancel")) code = api_cancel(&o);
         else if (post && !strcmp(path, "/api/open")) code = api_open(body, (size_t)r->clen, &o);
+        else if (post && !strcmp(path, "/api/delete")) code = api_delete(body, (size_t)r->clen, &o);
         else code = 404, sappend(&o, "{\"error\":\"no such call\"}");
         int rc = respond(c, code, "application/json", o.p, o.n, "Cache-Control: no-store\r\n", head);
         free(o.p);
@@ -597,6 +754,12 @@ static int handle(conn_t *c, req_t *r, const char *body) {
         if (!safe_rel(path + 6)) return respond(c, 400, "text/plain", "bad path", 8, NULL, head);
         char file[4096];
         snprintf(file, sizeof file, "%s/%s", maps_dir, path + 6);
+        return serve_file(c, r, file, head);
+    }
+    if (!strncmp(path, "/overviews/", 11)) {
+        if (!safe_rel(path + 11)) return respond(c, 400, "text/plain", "bad path", 8, NULL, head);
+        char file[4096];
+        snprintf(file, sizeof file, "%s/overviews/%s", data_dir, path + 11);
         return serve_file(c, r, file, head);
     }
     if (!strcmp(path, "/")) return serve_static(c, r, "app/index.html", head);

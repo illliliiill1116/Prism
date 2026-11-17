@@ -19,17 +19,21 @@
 <script type="module">
 import { createViewer, VIEW_KEYS } from "./js/viewer.js";
 /* the address's parameters are the options; the view goes back into it,
-   so a reload or a shared link opens the same place; ?test adds the
-   globals headless tests drive it through */
+   so a reload or a shared link opens the same place, and into the
+   browser's storage under the map's path ("prism-view /maps/<id>/"),
+   where the app's Export finds it to start the exported page with;
+   ?test adds the globals headless tests drive it through */
 const params = Object.fromEntries(new URLSearchParams(location.search));
+const mapPath = params.map ? decodeURIComponent(new URL(params.map.replace(/\/?$/, "/"), location.href).pathname) : "";
 createViewer(document.body, {
     ...params,
     keys: "page", testHooks: "test" in params,
     onView(view) {
-        const u = new URL(location.href), p = u.searchParams;
-        for (const k of VIEW_KEYS) if (view.has(k)) p.set(k, view.get(k)); else p.delete(k);
+        const u = new URL(location.href), p = u.searchParams, keep = {};
+        for (const k of VIEW_KEYS) if (view.has(k)) p.set(k, keep[k] = view.get(k)); else p.delete(k);
         u.search = p.toString().replace(/%2C/g, ",");
         try { history.replaceState(history.state, "", u); } catch {}
+        try { if (mapPath) localStorage.setItem("prism-view " + mapPath, JSON.stringify(keep)); } catch {}
     },
 });
 </script>

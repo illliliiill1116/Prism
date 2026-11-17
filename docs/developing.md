@@ -6,7 +6,8 @@
 | `cli/serve.c`, `app/` | `serve` (what no arguments do): the app, a local web server with its page (`app/`) and the viewer built in (`scripts/embed.sh`), which runs `prism map` for the world picked |
 | `cli/info.c` | `info`: what a world's `level.dat` says (name, version, spawn), for the page in the browser; `serve` reads it the same way |
 | `app/web.js`, `web/` | The app with no server: prism built for the browser (`make web`) run a command at a time in a worker (`prism-worker.js`), `prism map --plan` and `--index` around the bakes, the maps in the browser's storage served by `sw.js` |
-| `demo/`, `scripts/demo.sh` | The demo site: a box of a world baked with `prism map --clip` (`window_load` empties the rest before the light) and `demo/index.html` around the viewer |
+| `viewer/site.html`, `app/export.js`, `scripts/demo.sh` | A map as a site of its own: `site.html` around the viewer, filled in by the app's Export (a zip, read over HTTP from either backend; it starts at the view `viewer/index.html` last kept in localStorage under "prism-view <map path>") or by `demo.sh` (the demo: a box baked with `prism map --clip`, which `window_load` empties the rest of before the light) |
+| `cli/overview.c`, `app/picker.js` | The area picker: `prism overview` draws a region with isodraw a band of chunk rows at a time (memory), served by `prism serve` (`api/regions`, `api/overview`, kept under `<data>/overviews/`) or run in a worker (`web.js`, kept in the browser's storage); the picker reads a drag on the plane y 64 and bakes it as `prism map --clip` |
 | `cli/win/` | The Windows build's manifest (UTF-8 paths) |
 | `src/plat.h`, `src/plat/plat.c` | What differs between Windows and POSIX: processes, file renames and deletes, CPU and memory counts |
 | `cli/skinlist.c` | The skins a world's player heads name, for `scripts/fetch_skins.sh` |
@@ -15,7 +16,7 @@
 | `src/light/` | `light.c`: baked light per corner; `bounce.c`: bounced sunlight |
 | `src/mesh/` | `mesh.c`: blocks to quads at levels 0 and 1; `coarse.c`: level 2 cells |
 | `src/tiles/` | `tiles.c`: tile encoding and writing; `solid.c`: what a walker bumps into; `glb.c`: a glTF export of level 0 |
-| `src/iso/` | `isodraw.c`: level 0 drawn on the CPU into an isometric picture, window by window |
+| `src/iso/` | `isodraw.c`: level 0 drawn on the CPU into an isometric picture, window by window, turned by any yaw about the area's middle |
 | `scripts/` | `fetch_skins.sh` |
 | `viewer/index.html`, `embed.html` | The viewer as a page; an example of one in a page |
 | `viewer/js/viewer.js` | `createViewer`: the page element, renderer and camera, then each module in turn |

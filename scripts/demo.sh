@@ -1,6 +1,6 @@
 #!/bin/sh
 # The demo site: a piece of a world baked on its own (prism map --clip) and
-# put in demo/index.html with the viewer, as a static site.
+# put in viewer/site.html with the viewer, as a static site.
 #
 #   scripts/demo.sh <client.jar> <world dir> <x0,z0,x1,z1,ymin>
 #                   [--out dir] [--title text] [--cam x,y,z --at x,y,z] [--sun deg]
@@ -54,10 +54,12 @@ mkdir -p "$out"
 rm -f "$out"/map/*.log
 cp -r "$here/viewer/js" "$here/viewer/style.css" "$out/"
 
-# the title as HTML, then as sed's replacement text
+# the title as HTML, then as sed's replacement text; the page has no
+# caption (an export's names its world and area): the demo is just the view
 esc() { printf '%s' "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/[&|\\]/\\&/g'; }
 sed -e "s|@TITLE@|$(esc "$title")|g" \
-    -e "s|@BOX@|x $x0 to $x1, z $z0 to $z1, from y $ymin up|" \
-    -e "s|@CAM@|$cam|" -e "s|@AT@|$at|" -e "s|@SUN@|$sun|" \
-    "$here/demo/index.html" > "$out/index.html"
+    -e "s|@SUB@|x $x0 to $x1, z $z0 to $z1, from y $ymin up · |" \
+    -e "s|@START@|{ cam: [$cam], at: [$at], sun: $sun }|" \
+    -e '/<div class="cap">/,/<\/div>/d' \
+    "$here/viewer/site.html" > "$out/index.html"
 echo "demo: $out/ (serve it over HTTP and open index.html)"

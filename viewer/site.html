@@ -1,7 +1,9 @@
 <!doctype html>
-<!-- The demo site's page: one piece of a world, cut out with prism map
-     --clip, in the viewer. scripts/demo.sh fills in the @...@ and puts it
-     next to the viewer and the map in build-demo/. -->
+<!-- A map as a site of its own: this page, the viewer (js/, style.css)
+     and the map in map/. The app's Export (app/export.js) and
+     scripts/demo.sh fill in the @...@: the title and the line under it as
+     HTML, the start view as a JSON object of the viewer's options (cam,
+     at, sun; {} lets the viewer pick). -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -16,6 +18,11 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #c3d0d8; }
 .cap b { font-size: 15px; }
 .cap span { opacity: .75; }
 .cap a { color: inherit; }
+.file { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; padding: 16px;
+        background: #c3d0d8; font: 15px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; color: #1d2126; }
+.file div { max-width: 560px; background: #fff; border-radius: 12px; padding: 22px 26px; box-shadow: 0 6px 30px rgba(0,0,0,.12); }
+.file h1 { font-size: 20px; margin: 0 0 8px; }
+.file code { background: #eef1f4; padding: 1px 5px; border-radius: 4px; }
 </style>
 <script type="importmap">
 { "imports": {
@@ -26,13 +33,25 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #c3d0d8; }
 </head>
 <body>
 <div class="cap"><b>@TITLE@</b><br>
-<span>@BOX@ · drag to turn, wheel to zoom, ? for help</span></div>
+<span>@SUB@drag to turn, wheel to zoom, ? for help</span></div>
+<script>
+/* opened as a file (a double click): the browser runs none of the
+   viewer's scripts there, so say what to do instead */
+if (location.protocol === "file:") document.body.insertAdjacentHTML("beforeend", `<div class="file"><div>
+<h1>This map is a website</h1>
+<p>A browser won't run it from a file on your computer: it has to come from a web server.</p>
+<p><b>To share it</b>, put this whole folder on a static web host (Netlify, GitHub Pages, Cloudflare Pages
+or your own server) and open the address it gives you.</p>
+<p><b>To look at it on this computer</b>, open it in the prism app, or serve the folder,
+for example with <code>python -m http.server</code> in it, and open <code>http://localhost:8000/</code>.</p>
+</div></div>`);
+</script>
 <script type="module">
 import { createViewer, VIEW_KEYS } from "./js/viewer.js";
 /* the start view, unless the address has one (a shared link's) */
 const params = Object.fromEntries(new URLSearchParams(location.search));
 createViewer(document.body, {
-    cam: [@CAM@], at: [@AT@], sun: @SUN@,
+    ...@START@,
     ...params,
     map: "map", keys: "page",
     onView(view) {

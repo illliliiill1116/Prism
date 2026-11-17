@@ -39,10 +39,20 @@ The map in them is "IHOU", not part of this project (see [License](#license)).
 
 Run `prism` with no arguments (on Windows, double-click `prism.exe`). It
 opens a page in the browser that lists the worlds in Minecraft's saves
-folder and the maps baked so far. Pick a world, how much of it (a few
-regions around the spawn, or all of it) and which installed game version's
-textures to use, and it bakes it with a progress bar; then open it in the
-viewer. "Update" bakes again only what changed in the world since.
+folder and the maps baked so far. Pick a world and which installed game
+version's textures to use, then "Choose an area…": the world is drawn
+region by region in 2.5D (`prism overview`), and dragging on it from one
+corner to the other picks the area, with a slider for how deep the ground
+is cut. It bakes just that (`prism map --clip`), a map of its own, in
+seconds for a building or a village. Whole regions around the spawn, or
+all of the world, can still be baked too. Open a map to see it in the
+viewer, in a new tab. "Update" bakes again only what changed in the world since. "Export"
+downloads a map as a website in a zip: the viewer, a page and the map,
+to unzip onto any web host (see [Viewing](#viewing)) or pass on. The page
+opens where the map was last left in the viewer (the camera, the time of
+day and the camera panel's settings), so frame the build there first. "Folder"
+shows a map's files in the file manager, "Delete" removes the map (not the
+world).
 
 It is a small web server on this computer only (`127.0.0.1`, port 8820 or
 the next free one), with the page and the viewer built in. It stops when
@@ -75,7 +85,9 @@ has to be dropped again to update its map.
 A service worker (`sw.js`) serves the maps to the viewer and gives the
 pages the headers prism's threads need, so the first visit reloads once.
 A bake there takes about 1.1 to 1.4 times as long as the native one and up
-to about 1.7 GB of memory a region.
+to about 1.7 GB of memory a region. "Export" gets a map out of the
+browser, as a website in a zip like the app's, and "Delete" frees the
+space it takes there.
 
 ## Building
 
@@ -154,6 +166,14 @@ as an isometric PNG on the CPU, with the same mesh and baked light as the
 viewer at one time of day. How it is drawn, its memory use, and how to put
 neighbouring pictures together: [docs/iso.md](docs/iso.md).
 
+`--yaw deg` turns the area about its middle first (0 is the view above;
+any angle).
+
+`prism overview <client.jar> <world> <out dir> <rx> <rz> [<rx> <rz>...]`
+draws whole regions the same way but quickly (no cast shadows, 2 pixels a
+block by default, about 2 s and 1.8 GB a region), one picture and one json
+of where it goes each, for the app's area picker.
+
 | Option | |
 |---|---|
 | `--sun deg` | The sun along its arc: 0 sunrise, 90 noon, 180 sunset, past that the moon (default 136.4) |
@@ -193,8 +213,8 @@ scripts/demo.sh <client.jar> <world dir> <x0,z0,x1,z1,ymin> \
 ```
 
 bakes the box with `--clip` into `build-demo/` (or `--out`), with the
-viewer and a page of its own (`demo/index.html`), titled with the world's
-name. The page starts at `--cam` looking at `--at`, or else from above
+viewer and a page of its own (`viewer/site.html`, the one Export uses,
+without its caption), the browser tab titled with the world's name. The page starts at `--cam` looking at `--at`, or else from above
 the box's north-west corner. It is a static site of its own, apart from
 the app's `build-web/`. `scripts/pages.sh` puts the two on the
 `gh-pages` branch, the app under `app/` and the demo under `demo/`, as

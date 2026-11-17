@@ -19,7 +19,9 @@
  * A pixel goes to the image only where the nearest thing in it is the
  * core's. Rays into the view go towards -x and -z, so a window drawn after
  * those at lower x and z (iso_draw's caller goes by x + z) is in front of
- * them where they meet, and draws over them.
+ * them where they meet, and draws over them. A turned picture (the area
+ * turned about its middle, iso_image_init's yaw) is the same in x', z':
+ * its windows go by their middles along the view (prism iso's).
  */
 #include "prism.h"
 
@@ -131,7 +133,7 @@ static float clampf(float x, float a, float b) { return x < a ? a : x > b ? b : 
 
 static void sun_vec(float deg, float o[3]) {
     float th = deg * 3.14159265f / 180;
-    o[0] = cosf(th); o[1] = sinf(th) * cosf(SUN_TILT); o[2] = -sinf(th) * sinf(SUN_TILT);
+    o[0] = dcosf(th); o[1] = dsinf(th) * dcosf(SUN_TILT); o[2] = -dsinf(th) * dsinf(SUN_TILT);
 }
 
 /* sun.js's placeSun */
@@ -170,7 +172,7 @@ static float sun_windows(const uint8_t w8[4], float T) {
     return a > b ? a : b;
 }
 
-static float powlin(float x) { return x <= 0 ? 0 : powf(x, 2.2f); }
+static float powlin(float x) { return x <= 0 ? 0 : dpowf(x, 2.2f); }
 
 /* ---- the shadow map ---- */
 
@@ -392,9 +394,17 @@ typedef struct {
 
 static void project(const iso_t *I, double cx, double cz, const float p[3], double *sx, double *sy, float *d) {
     double S = (double)I->scale * I->ss, wx = p[0] + cx, wy = p[1], wz = p[2] + cz;
+    const iso_image_t *g = I->img;
+    if (g->turned) {
+        /* turned about the pivot: the projection of x', z' */
+        double ax = wx - g->px, az = wz - g->pz;
+        wx = g->px + ax * g->c - az * g->s;
+        wz = g->pz + ax * g->s + az * g->c;
+        *d = (float)(p[0] * (g->c + g->s) + p[1] + p[2] * (g->c - g->s));
+    } else
+        *d = (float)(p[0] + p[1] + p[2]);
     *sx = (wx - wz) * S;
     *sy = (wx + wz) * S / 2 + (320 - wy) * S + S / 2;
-    *d = (float)(p[0] + p[1] + p[2]);
 }
 
 /* Lights quad lq of material m as the viewer's vertex and fragment
@@ -425,7 +435,10 @@ static int prep_quad(const iso_t *I, const mbuf_t *mb, int m, size_t lq, double 
         int gx = (int)floorf((P[0] + P[6]) * 0.5f + n[0] * 0.5f) + MARGIN + REG / 2;
         int gz = (int)floorf((P[2] + P[8]) * 0.5f + n[2] * 0.5f) + MARGIN + REG / 2;
         if (gx < 0 || gz < 0 || gx >= GW || gz >= GW || coltop[gz * GW + gx] < 0) {
-            float L = fabsf(n[0]) > 0.5f ? CUT_X : CUT_Z;
+            /* by the side of the picture it faces: the turned normal */
+            const iso_image_t *g = I->img;
+            float tx = (float)(n[0] * g->c - n[2] * g->s), tz = (float)(n[0] * g->s + n[2] * g->c);
+            float L = g->turned ? CUT_X * tx * tx + CUT_Z * tz * tz : fabsf(n[0]) > 0.5f ? CUT_X : CUT_Z;
             o->mat = (uint8_t)m;
             o->flags = 0;
             l->glow = 0;
@@ -452,7 +465,7 @@ static int prep_quad(const iso_t *I, const mbuf_t *mb, int m, size_t lq, double 
     if (plant) memcpy(ns, S->dir, sizeof ns);
     else if (ndl < 0) for (int a = 0; a < 3; a++) ns[a] = -ns[a];
     float push = I->shadows ? 1.5f / I->sm.tpb : 0;
-    float bounce_up = fmaxf(sinf(S->T * 3.14159265f / 255), 0) * cosf(SUN_TILT);
+    float bounce_up = fmaxf(dsinf(S->T * 3.14159265f / 255), 0) * dcosf(SUN_TILT);
     int any_sun = 0;
     for (int i = 0; i < 4; i++) {
         const float *p = &P[i * 3];
@@ -545,7 +558,7 @@ static void prep_one(const pjob_t *J, int64_t k) {
         for (int a = 0; a < 3; a++) { e1[a] = P[3 + a] - P[a]; e2[a] = P[9 + a] - P[a]; }
         n[0] = e2[1] * e1[2] - e2[2] * e1[1];
         n[2] = e2[0] * e1[1] - e2[1] * e1[0];
-        float nl = sqrtf(n[0] * n[0] + n[2] * n[2] + powf(e2[2] * e1[0] - e2[0] * e1[2], 2));
+        float nl = sqrtf(n[0] * n[0] + n[2] * n[2] + dpowf(e2[2] * e1[0] - e2[0] * e1[2], 2));
         int bx = (int)floor((P[0] + P[6]) * 0.5 - n[0] / nl * 0.01 + J->cx);
         int bz = (int)floor((P[2] + P[8]) * 0.5 - n[2] / nl * 0.01 + J->cz);
         const int *c = J->I->core;
@@ -874,7 +887,7 @@ static void draw_band(const iso_t *I, band_t *B, int bi) {
             float *o = &B->col[i * 4];
             float path = B->dep[i] > -1e29f ? (B->wdep[i] - B->dep[i]) * 0.57735f : 1e9f;
             for (int c = 0; c < 3; c++) {
-                float tr = expf(-path * WATER_ABS[c]);
+                float tr = dexpf(-path * WATER_ABS[c]);
                 float under = o[c] * tr + base[c] * (1 - tr) * 0.5f;
                 o[c] = under + (l->sky[c] - under) * l->F;
             }
@@ -953,13 +966,34 @@ void iso_project(int scale, double wx, double wy, double wz, double *sx, double 
     *sy = (wx + wz) * scale / 2.0 + (320 - wy) * scale + scale / 2.0;
 }
 
-int iso_image_init(iso_image_t *img, int scale, int x0, int z0, int x1, int z1, int ymin) {
+/* where world point wx, wy, wz goes in img's projection (turned, if it is) */
+void iso_image_project(const iso_image_t *img, int scale, double wx, double wy, double wz, double *sx, double *sy) {
+    if (img->turned) {
+        double ax = wx - img->px, az = wz - img->pz;
+        wx = img->px + ax * img->c - az * img->s;
+        wz = img->pz + ax * img->s + az * img->c;
+    }
+    iso_project(scale, wx, wy, wz, sx, sy);
+}
+
+int iso_image_init(iso_image_t *img, int scale, double yaw, int x0, int z0, int x1, int z1, int ymin) {
     memset(img, 0, sizeof *img);
+    yaw = fmod(fmod(yaw, 360) + 360, 360);
+    if (yaw != 0) {
+        /* turned about the area's middle; quarter turns exact */
+        double r = yaw * 3.14159265358979 / 180;
+        img->turned = 1;
+        img->c = yaw == 90 || yaw == 270 ? 0 : yaw == 180 ? -1 : cos(r);
+        img->s = yaw == 90 ? 1 : yaw == 270 ? -1 : yaw == 180 ? 0 : sin(r);
+        img->px = (x0 + x1 + 1) / 2.0;
+        img->pz = (z0 + z1 + 1) / 2.0;
+    } else
+        img->c = 1;
     /* the box's corners, ymin to the world's top */
     double lo[2] = { 1e300, 1e300 }, hi[2] = { -1e300, -1e300 };
     for (int k = 0; k < 8; k++) {
         double sx, sy;
-        iso_project(scale, k & 1 ? x1 + 1 : x0, k & 2 ? 320 : ymin, k & 4 ? z1 + 1 : z0, &sx, &sy);
+        iso_image_project(img, scale, k & 1 ? x1 + 1 : x0, k & 2 ? 320 : ymin, k & 4 ? z1 + 1 : z0, &sx, &sy);
         if (sx < lo[0]) lo[0] = sx;
         if (sx > hi[0]) hi[0] = sx;
         if (sy < lo[1]) lo[1] = sy;
@@ -996,7 +1030,7 @@ int iso_image_write(const iso_image_t *img, const char *path, int nthreads, long
         if (img->x0[y] < x0) x0 = img->x0[y];
         if (img->x1[y] > x1) x1 = img->x1[y];
     }
-    if (y0 > y1) { fprintf(stderr, "iso: nothing was drawn\n"); return 1; }
+    if (y0 > y1) { fprintf(stderr, "iso: nothing to draw there (the area is empty above --ymin)\n"); return 1; }
     int w = x1 - x0 + 1, h = y1 - y0 + 1;
     box[0] = img->ox + x0; box[1] = img->oy + y0; box[2] = w; box[3] = h;
     png_stream_t *st = png_stream_begin(path, (uint32_t)w, (uint32_t)h, 6, nthreads);
@@ -1034,6 +1068,11 @@ int iso_draw(iso_image_t *img, mbuf_t mb[MAT_COUNT], const canvas_t *atlas, cons
     for (int i = 0; i < 256; i++) I.lin[i] = srgb_to_lin(i / 255.0f);
     for (int i = 0; i < 4096; i++) I.enc[i] = (uint8_t)lrintf(lin_to_srgb(i / 4095.0f) * 255);
     I.Vn[0] = I.Vn[1] = I.Vn[2] = 0.57735027f;
+    if (img->turned) {
+        /* towards the eye: (1, 1, 1) turned back */
+        I.Vn[0] = (float)((img->c + img->s) * 0.57735027);
+        I.Vn[2] = (float)((img->c - img->s) * 0.57735027);
+    }
     place_sun(&I.sun, o->sun);
     if (nthreads < 1) nthreads = 1;
     if (nthreads > 256) nthreads = 256;

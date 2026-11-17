@@ -210,9 +210,11 @@ typedef struct { uint16_t x, y, z; uint8_t e; } emitter_t;
 extern emitter_t *emv;
 extern uint32_t emc[EMIT_CW * EMIT_CW * EMIT_CH + 1];
 
-/* A voxel below cave_y that no sky light reaches. */
+/* A voxel below cave_y that no sky light reaches; not under mesh_y0,
+ * which is cut away (window_clear_outside, --clip), so open. */
+extern int mesh_y0;
 static inline int is_cave(int x, int y, int z) {
-    return y + YMIN < cave_y && sky_at(x, y, z) == 0;
+    return y + YMIN < cave_y && y >= mesh_y0 && sky_at(x, y, z) == 0;
 }
 
 /* A chunk's NBT (MCA_OK; MCA_ERR_EMPTY if it is not there, another
@@ -467,10 +469,14 @@ typedef struct {
     long ox, oy;
     uint8_t **rows;
     int *x0, *x1;
+    /* turned by yaw about px, pz: x' = px + (x - px) c - (z - pz) s, z' = pz + (x - px) s + (z - pz) c */
+    int turned;
+    double c, s, px, pz;
 } iso_image_t;
 
 void iso_project(int scale, double wx, double wy, double wz, double *sx, double *sy);
-int iso_image_init(iso_image_t *img, int scale, int x0, int z0, int x1, int z1, int ymin);
+int iso_image_init(iso_image_t *img, int scale, double yaw, int x0, int z0, int x1, int z1, int ymin);
+void iso_image_project(const iso_image_t *img, int scale, double wx, double wy, double wz, double *sx, double *sy);
 void iso_image_free(iso_image_t *img);
 int iso_image_write(const iso_image_t *img, const char *path, int nthreads, long box[4]);
 int iso_draw(iso_image_t *img, mbuf_t mb[MAT_COUNT], const canvas_t *atlas, const iso_opts_t *o, const int core[4]);

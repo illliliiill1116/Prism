@@ -19,12 +19,12 @@ const REGION_DIRS = ["dimensions/minecraft/overworld/region/", "region/"];
 const MANIFEST = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
 
 /* prism with args in a worker, see prism-worker.js; its lines go to onLine */
-let current = null; /* the run under way: its worker and how to end its wait */
-function run(job, onLine) {
+let current = null; /* the bake's run under way: its worker and how to end its wait */
+function run(job, onLine, bakes = true) {
     const w = new Worker(new URL("../prism-worker.js", import.meta.url), { type: "module" });
     return new Promise((ok) => {
         const end = (r) => { w.terminate(); if (current && current.w === w) current = null; ok(r); };
-        current = { w, end };
+        if (bakes) current = { w, end };
         w.onmessage = ({ data }) => {
             if (data.line != null) onLine && onLine(data.line);
             if (data.done) end(data);
@@ -124,6 +124,11 @@ function regionsOf(world) {
     return new Map();
 }
 
+/* an area's clip, its corners in order; and the map it makes, named as
+   prism serve names it (serve.c's api_bake) */
+export const sortClip = ([x0, z0, x1, z1, y]) => [Math.min(x0, x1), Math.min(z0, z1), Math.max(x0, x1), Math.max(z0, z1), y];
+export const areaId = (id, c) => `${id} ${c[0]},${c[1]} to ${c[2]},${c[3]}`;
+
 export async function webBackend() {
     const root = await navigator.storage.getDirectory();
     const maps = await root.getDirectoryHandle("maps", { create: true });
@@ -208,16 +213,21 @@ export async function webBackend() {
     }
 
     /* prism map, as the native one runs it: --plan, a bake a region, --index */
-    async function bake({ world: id, jar: ver, near }) {
+    async function bake({ world: id, jar: ver, near, clip }) {
         if (job && job.running) return { error: "a bake is under way" };
         const world = worlds.get(id);
         if (!world) return { error: "no such world" };
         const regionFiles = new Map();
         for (const [n, f] of regionsOf(world)) regionFiles.set(n, { name: "region/" + n, data: f, mtime: f.lastModified });
         const v = world.info;
-        const out = await maps.getDirectoryHandle(id, { create: true });
+        /* an area of the world is a map of its own (as prism serve names it) */
+        if (clip) clip = sortClip(clip);
+        const mapId = clip ? areaId(id, clip) : id;
+        const out = await maps.getDirectoryHandle(mapId, { create: true });
         const mapArgs = ["map", "/mc/game.jar", "/mc/region", "/out"];
-        if (near >= 0) mapArgs.push("--near", `${v.spawn[0]},${v.spawn[1]},${near}`);
+        const clipArgs = clip ? ["--clip", clip.join(",")] : [];
+        if (clip) mapArgs.push(...clipArgs);
+        else if (near >= 0) mapArgs.push("--near", `${v.spawn[0]},${v.spawn[1]},${near}`);
         const all = [...regionFiles.values()];
         /* each bake's index.json, which --plan and --index read */
         const indexes = async () => {
@@ -231,14 +241,14 @@ export async function webBackend() {
         };
         cancelled = false;
         const t0 = Date.now();
-        job = { map: id, running: true, code: 0, cancelled: false, elapsed: 0, total: 0, done: 0, baked: 0, failed: 0, secs: 0, current: "", warning: "" };
+        job = { map: mapId, running: true, code: 0, cancelled: false, elapsed: 0, total: 0, done: 0, baked: 0, failed: 0, secs: 0, current: "", warning: "" };
         const tick = setInterval(() => { job.elapsed = Math.round((Date.now() - t0) / 1000); }, 1000);
         const finish = (code) => { clearInterval(tick); job.running = false; job.code = code; job.cancelled = cancelled; job.current = ""; };
         (async () => {
             const g = await gameJar(ver || v.version || "", (f) => { job.download = f; });
             delete job.download;
             const jar = { name: "game.jar", data: g.file, mtime: g.file.lastModified };
-            await writeFile(out, "prism.json", JSON.stringify({ world: id, jar: g.ver, near, name: v.name || id }) + "\n");
+            await writeFile(out, "prism.json", JSON.stringify({ world: id, jar: g.ver, near: clip ? -1 : near, ...(clip ? { clip } : {}), name: v.name || id }) + "\n");
             if (cancelled) return finish(1);
             const lines = [];
             let r = await run({ args: [...mapArgs, "--plan"], files: [jar, ...all], preload: await indexes() }, (l) => lines.push(l));
@@ -262,7 +272,7 @@ export async function webBackend() {
                         if (regionFiles.has(n)) files.push(regionFiles.get(n));
                     }
                 const t = Date.now(), log = [];
-                r = await run({ args: ["bake", "/mc/game.jar", "/mc/region", sx, sz, "/out/r", String(threads)], files, collect: "/out/r", pool },
+                r = await run({ args: ["bake", "/mc/game.jar", "/mc/region", sx, sz, "/out/r", String(threads), ...clipArgs], files, collect: "/out/r", pool },
                     (l) => { log.push(l); if (l.startsWith("warning: ")) job.warning = l; });
                 if (cancelled) return finish(1);
                 if (r.code) { job.failed++; job.warning = `r.${rx}.${rz}: ${log.slice(-1)[0] || "failed"}`; }
@@ -284,10 +294,58 @@ export async function webBackend() {
         return { ok: true };
     }
 
+    /* The area picker's (picker.js): a world's regions, and one's picture
+       (prism overview), kept in the storage for as long as the region file
+       is the same; one at a time, each taking a bake's memory. */
+    const overviews = await root.getDirectoryHandle("overviews", { create: true });
+    let ovChain = Promise.resolve();
+    async function overview(id, ver, rx, rz) {
+        const world = worlds.get(id);
+        const f = world && regionsOf(world).get(`r.${rx}.${rz}.mca`);
+        if (!f) return { error: "no such region" };
+        const g = await gameJar(ver || world.info.version || "", () => {});
+        const key = `${encodeURIComponent(id)}/${g.ver}/r.${rx}.${rz}`, stamp = `${f.size}-${f.lastModified}`;
+        const dir = await overviews.getDirectoryHandle(encodeURIComponent(id), { create: true });
+        const vdir = await dir.getDirectoryHandle(g.ver, { create: true });
+        const result = async () => {
+            const js = JSON.parse(await readText(vdir, `r.${rx}.${rz}.json`));
+            if (js.stamp !== stamp) return null;
+            const png = js.w ? await child(vdir, `r.${rx}.${rz}.png`) : null;
+            return { ...js, png: png ? URL.createObjectURL(await png.getFile()) : "" };
+        };
+        try { const r = await result(); if (r) return r; } catch {}
+        const work = ovChain.then(async () => {
+            const files = [{ name: "game.jar", data: g.file, mtime: g.file.lastModified }];
+            const rf = regionsOf(world);
+            for (let dz = -1; dz <= 1; dz++)
+                for (let dx = -1; dx <= 1; dx++) {
+                    const n = `r.${rx + dx}.${rz + dz}.mca`;
+                    if (rf.has(n)) files.push({ name: "region/" + n, data: rf.get(n), mtime: rf.get(n).lastModified });
+                }
+            const cores = navigator.hardwareConcurrency || 4, pool = Math.min(Math.max(cores, 16), 64);
+            const r = await run({ args: ["overview", "/mc/game.jar", "/mc/region", "/out", String(rx), String(rz), "--threads", String(Math.min(cores, 16))],
+                files, collect: "/out", pool }, null, false);
+            const js = r.files.find((x) => x.path === `r.${rx}.${rz}.json`), png = r.files.find((x) => x.path === `r.${rx}.${rz}.png`);
+            if (r.code || !js) throw new Error("can't draw " + key);
+            if (png) await writeFile(vdir, `r.${rx}.${rz}.png`, png.data);
+            const meta = { ...JSON.parse(new TextDecoder().decode(js.data)), stamp };
+            await writeFile(vdir, `r.${rx}.${rz}.json`, JSON.stringify(meta));
+        });
+        ovChain = work.catch(() => {});
+        await work;
+        return result();
+    }
+
     return {
         web: true,
         state,
         bake,
+        regions: async (id) => {
+            const w = worlds.get(id);
+            if (!w) return { error: "no such world" };
+            return { regions: [...regionsOf(w).keys()].map((n) => n.match(REGION).slice(1, 3).map(Number)) };
+        },
+        overview,
         async cancel() {
             cancelled = true;
             if (current) current.end({ done: true, code: 1, files: [] });
@@ -310,6 +368,15 @@ export async function webBackend() {
         iconUrl: (w) => worlds.get(w.id) && worlds.get(w.id).icon,
         mapUrl: (id) => "viewer/?map=" + encodeURIComponent(new URL("maps/" + id + "/", location.href).pathname),
         logUrl: () => null,
+        /* a map gone from the browser's storage (not while it bakes) */
+        async remove(id) {
+            if (job && job.running && job.map === id) return { error: "it is being baked" };
+            await maps.removeEntry(id, { recursive: true });
+            if (job && job.map === id) job = null;
+            return { ok: true };
+        },
+        mapBase: (id) => "maps/" + encodeURIComponent(id) + "/",
+        viewerFiles: () => fetch("viewer/files.json").then((r) => r.json()),
         canOpenFolder: false,
     };
 }

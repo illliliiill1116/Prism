@@ -42,6 +42,7 @@ int bake_region(const char *rdir, int c0x, int c0z, const char *out, int nthread
 int write_atomic(const char *path, const void *p, size_t n);
 int cmd_map(int argc, char **argv);
 int cmd_iso(int argc, char **argv);
+int cmd_overview(int argc, char **argv);
 int cmd_serve(int argc, char **argv);
 int cmd_info(int argc, char **argv);
 

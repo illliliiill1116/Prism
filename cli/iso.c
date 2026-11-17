@@ -1,18 +1,22 @@
 /*
  * prism iso: a world area as an isometric picture, drawn on the CPU (see
- * src/isodraw.c), in the 2.5D renderer's projection.
+ * src/iso/isodraw.c), in the 2.5D renderer's projection.
  *
  *   prism iso <client.jar> <world or region dir> <x0> <z0> <x1> <z1> <out.png>
  *             [--sun deg] [--scale px] [--ss n] [--ymin y] [--bounce-rays n] [--threads n] [--noshadow]
+ *             [--yaw deg]
  *
  * x0, z0 and x1, z1 are opposite corners, world blocks, both inside. The
  * area goes in windows of the bake's size, each loaded with the world
  * around it, so the light and the shadows falling in are the world's; the
  * ground is cut open at the area's edge (and at --ymin, below which
  * nothing is drawn). Each window's core, CORE chunks
- * square, is what it draws; BACK chunks before it (-x, -z) are what the
- * core's water at its back edge looks down to, and the chunk after it
- * (+x, +z) casts its near shadows (NEAR1 blocks, a fence's 12).
+ * square, is what it draws; BACK chunks behind it (away from the eye) are
+ * what the core's water at its back edge looks down to, and the chunk in
+ * front of it casts its near shadows (NEAR1 blocks, a fence's 12).
+ *
+ * --yaw turns the area about its middle (degrees, the picture's own way
+ * round; 0 is the 2.5D renderer's view).
  */
 #include "cli.h"
 
@@ -22,10 +26,17 @@ _Static_assert(BACK + CORE + 1 == REG / 16, "a window is BACK + CORE + 1 chunks"
 
 static int floor_div(int a, int b) { return a >= 0 ? a / b : -((-a + b - 1) / b); }
 
+typedef struct { int cx, cz; double key; } win_t;
+static int by_key(const void *a, const void *b) {
+    double d = ((const win_t *)a)->key - ((const win_t *)b)->key;
+    return d < 0 ? -1 : d > 0;
+}
+
 int cmd_iso(int argc, char **argv) {
     if (argc < 8) {
         fprintf(stderr, "usage: prism iso <client.jar> <world or region dir> <x0> <z0> <x1> <z1> <out.png> [--sun deg] [--scale px]\n"
-                        "                 [--ss n] [--ymin y] [--bounce-rays n] [--threads n] [--noshadow]\n");
+                        "                 [--ss n] [--ymin y] [--bounce-rays n] [--threads n] [--noshadow]\n"
+                        "                 [--yaw deg]\n");
         return 2;
     }
     const char *jar = argv[1], *out = argv[7];
@@ -36,6 +47,7 @@ int cmd_iso(int argc, char **argv) {
     if (z0 > z1) { int t = z0; z0 = z1; z1 = t; }
     iso_opts_t o = { .scale = 16, .ss = 1, .shadows = 1, .threads = 16, .sun = 136.4f };
     int ymin = YMIN, rays = 16;
+    double yaw = 0;
     for (int i = 8; i < argc; i++) {
         const char *a = argv[i], *v = i + 1 < argc ? argv[i + 1] : NULL;
         if (strcmp(a, "--noshadow") == 0) { o.shadows = 0; continue; }
@@ -46,6 +58,7 @@ int cmd_iso(int argc, char **argv) {
         else if (strcmp(a, "--threads") == 0) o.threads = atoi(v);
         else if (strcmp(a, "--ymin") == 0) ymin = atoi(v);
         else if (strcmp(a, "--bounce-rays") == 0) rays = atoi(v);
+        else if (strcmp(a, "--yaw") == 0) yaw = atof(v);
         else { fprintf(stderr, "unknown option %s\n", a); return 2; }
         i++;
     }
@@ -55,11 +68,6 @@ int cmd_iso(int argc, char **argv) {
     }
     big_allocs_mapped();
     double t0 = now_s();
-    iso_image_t img;
-    if (iso_image_init(&img, o.scale, x0, z0, x1, z1, ymin)) {
-        fprintf(stderr, "the picture would be too large: a smaller area or --scale\n");
-        return 1;
-    }
     if (prism_open(jar)) return 1;
     /* only the sun the picture has (isodraw.c's place_sun: the moon's arc is the sun's) */
     float deg = fmodf(fmodf(o.sun, 360) + 360, 360);
@@ -67,18 +75,29 @@ int cmd_iso(int argc, char **argv) {
     /* and only the quads that show: isodraw.c lights them (light_quad) */
     light_defer = 1;
     set_bounce_rays(rays);
+    iso_image_t img;
+    if (iso_image_init(&img, o.scale, yaw, x0, z0, x1, z1, ymin)) {
+        fprintf(stderr, "the picture would be too large: a smaller area or --scale\n");
+        return 1;
+    }
+    /* windows go back to front along the view; each loaded with BACK
+     * chunks behind its core and one in front */
+    double vx = img.c + img.s, vz = img.c - img.s;
     int kx0 = floor_div(x0, 16), kz0 = floor_div(z0, 16);
     int nx = (floor_div(x1, 16) - kx0) / CORE + 1, nz = (floor_div(z1, 16) - kz0) / CORE + 1;
     printf("iso: %d x %d blocks, %d window%s, up to %d x %d px\n", x1 - x0 + 1, z1 - z0 + 1, nx * nz,
            nx * nz > 1 ? "s" : "", img.w, img.h);
     double t_load = 0, t_mesh = 0, t_draw = 0;
     int done = 0;
-    /* back to front: by x + z (see isodraw.c) */
-    for (int s = 0; s <= nx + nz - 2; s++)
-        for (int i = 0; i < nx; i++) {
-            int j = s - i;
-            if (j < 0 || j >= nz) continue;
+    win_t *wins = xmalloc((size_t)nx * nz * sizeof *wins);
+    for (int i = 0; i < nx; i++)
+        for (int j = 0; j < nz; j++) {
             int cx = kx0 + i * CORE, cz = kz0 + j * CORE;
+            wins[i * nz + j] = (win_t){ cx, cz, (cx + CORE / 2.0) * vx + (cz + CORE / 2.0) * vz };
+        }
+    qsort(wins, (size_t)nx * nz, sizeof *wins, by_key);
+    for (int w = 0; w < nx * nz; w++) {
+            int cx = wins[w].cx, cz = wins[w].cz;
             int core[4] = { cx * 16, cz * 16, (cx + CORE) * 16 - 1, (cz + CORE) * 16 - 1 };
             if (core[0] < x0) core[0] = x0;
             if (core[1] < z0) core[1] = z0;
@@ -87,7 +106,7 @@ int cmd_iso(int argc, char **argv) {
             double a = now_s();
             canvas_t atlas;
             long lit, emitters;
-            window_load(rdir, cx - BACK, cz - BACK, &atlas, &lit, &emitters);
+            window_load(rdir, vx >= 0 ? cx - BACK : cx - 1, vz >= 0 ? cz - BACK : cz - 1, &atlas, &lit, &emitters);
             window_clear_outside(x0, z0, x1, z1, ymin);
             double b = now_s();
             lod_mode = 0;
@@ -104,6 +123,7 @@ int cmd_iso(int argc, char **argv) {
                    chunks_loaded, quads, d - a);
             fflush(stdout);
         }
+    free(wins);
     long box[4];
     double t_w = now_s();
     if (iso_image_write(&img, out, o.threads, box)) return 1;

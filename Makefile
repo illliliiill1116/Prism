@@ -128,6 +128,8 @@ web: $(WEB_BUILD)/prism.js $(EMBED) web/sw.js web/prism-worker.js
 	cp app/*.js app/*.css $(WEB_BUILD)/app/
 	cp viewer/*.html viewer/*.css $(WEB_BUILD)/viewer/
 	cp viewer/js/*.js $(WEB_BUILD)/viewer/js/
+	# the viewer's scripts, for the page's Export (app/export.js)
+	cd viewer && ls js/*.js | sed 's/.*/"&"/' | paste -sd, | sed 's/.*/[&]/' > ../$(WEB_BUILD)/viewer/files.json
 	cp web/sw.js web/prism-worker.js $(WEB_BUILD)/
 
 $(WEB_BUILD)/prism.js: $(WASM_OBJS)
