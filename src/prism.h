@@ -456,6 +456,18 @@ void window_clear_outside(int x0, int z0, int x1, int z1, int ymin);
  * light, so it stands alone: its cut sides lit as the open air they face */
 extern int clip_on, clip[5];
 int parse_clip(const char *s);
+/* window_part_on: window_load reads only the chunks in window_part (x0,
+ * z0, x1, z1, chunk coordinates, inclusive) of its window and margin, the
+ * rest left empty: for a caller that meshes only a part of it (overview) */
+extern int window_part_on, window_part[4];
+/* the 64 voxels from grid[i] (i a multiple of 64) all air: the scans over
+ * the whole grid skip them, most of it being air */
+static inline int grid_air64(size_t i) {
+    const uint64_t *g = (const uint64_t *)&grid[i];
+    uint64_t o = 0;
+    for (int k = 0; k < 16; k++) o |= g[k];
+    return !o;
+}
 
 /* ---- iso/isodraw.c ---- */
 
@@ -472,6 +484,9 @@ typedef struct {
     /* turned by yaw about px, pz: x' = px + (x - px) c - (z - pz) s, z' = pz + (x - px) s + (z - pz) c */
     int turned;
     double c, s, px, pz;
+    /* iso_image_heights: per pixel drawn, the world y of what it shows
+     * (its nearest surface), as (y + 64) * 128 + 1; 0 where nothing is */
+    uint16_t **hts;
 } iso_image_t;
 
 void iso_project(int scale, double wx, double wy, double wz, double *sx, double *sy);
@@ -479,6 +494,12 @@ int iso_image_init(iso_image_t *img, int scale, double yaw, int x0, int z0, int 
 void iso_image_project(const iso_image_t *img, int scale, double wx, double wy, double wz, double *sx, double *sy);
 void iso_image_free(iso_image_t *img);
 int iso_image_write(const iso_image_t *img, const char *path, int nthreads, long box[4]);
+/* keep the heights too (not for a turned image), and write them for the
+ * box iso_image_write wrote: a PNG, the 16 bits in red (high) and green,
+ * alpha 0 where nothing is. What a pixel shows is then at world y, and so
+ * at x, z (iso_project backwards): the area picker's */
+void iso_image_heights(iso_image_t *img);
+int iso_image_write_heights(const iso_image_t *img, const char *path, int nthreads, const long box[4]);
 int iso_draw(iso_image_t *img, mbuf_t mb[MAT_COUNT], const canvas_t *atlas, const iso_opts_t *o, const int core[4]);
 
 #endif

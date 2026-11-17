@@ -5,9 +5,13 @@
    openPicker({ backend, world, jar, T, estimate, onBake }) puts it over the
    page; onBake([x0, z0, x1, z1, ymin]) when the area is chosen. The
    backend gives regions(world) and overview(world, jar, rx, rz): a
-   region's picture's corner and size in projected pixels, and its URL. */
+   region's picture's corner and size in projected pixels, its URL, and
+   its heights' (hpng: the world y each pixel shows, so the block under the
+   pointer is the one it points at, and what the area takes is lit up
+   pixel by pixel). */
 
-const REF_Y = 64; /* the ground the drag is read on: the pictures have no heights */
+const REF_Y = 64; /* where there are no heights (nothing drawn): the ground the drag is read on */
+const EPS = 1 / 64; /* into what a pixel shows, so a side's pixels are its block's */
 const REG = 512;
 
 /* prism iso's projection (isodraw.c's iso_project), s pixels a block */
@@ -15,6 +19,21 @@ const project = (s, x, y, z) => [(x - z) * s, ((x + z) * s) / 2 + (320 - y) * s 
 function unproject(s, sx, sy, y) {
     const a = sx / s, b = ((sy - (320 - y) * s - s / 2) * 2) / s;
     return [(a + b) / 2, (b - a) / 2];
+}
+
+/* prism overview's heights picture as one number a pixel: (y + 64) * 128
+   + 1 in red (high) and green, 0 where nothing is. Read as stored: no
+   colour management, no premultiplying. */
+async function heights(url, w, h) {
+    const bmp = await createImageBitmap(await (await fetch(url)).blob(), { colorSpaceConversion: "none", premultiplyAlpha: "none" });
+    const c = document.createElement("canvas");
+    c.width = w; c.height = h;
+    const g = c.getContext("2d", { willReadFrequently: true });
+    g.drawImage(bmp, 0, 0);
+    bmp.close();
+    const d = g.getImageData(0, 0, w, h).data, out = new Uint16Array(w * h);
+    for (let i = 0; i < out.length; i++) if (d[i * 4 + 3] === 255) out[i] = (d[i * 4] << 8) | d[i * 4 + 1];
+    return out;
 }
 
 export function openPicker({ backend, world, jar, T, estimate, onBake }) {
@@ -43,11 +62,29 @@ export function openPicker({ backend, world, jar, T, estimate, onBake }) {
     /* the view: projected pixel (cx, cy) at the centre, zoom screen pixels to one */
     const sp = project(S, world.spawn[0], REF_Y, world.spawn[1]);
     let cx = sp[0], cy = sp[1], zoom = 0.5, W = 1, H = 1, dpr = 1;
-    let regions = [], sel = null, dead = false;
+    let regions = [], sel = null, dead = false, refY = REF_Y;
     const urls = [];
 
     const toScreen = (px, py) => [(px - cx) * zoom + W / 2, (py - cy) * zoom + H / 2];
-    const toWorld = (mx, my, y = REF_Y) => unproject(S, cx + (mx - W / 2) / zoom, cy + (my - H / 2) / zoom, y).map(Math.floor);
+    /* the world y projected pixel px, py shows (the front region's), or null */
+    function heightAt(px, py) {
+        for (let k = regions.length - 1; k >= 0; k--) {
+            const r = regions[k];
+            if (!r.hts) continue;
+            const ix = Math.floor(px - r.x), iy = Math.floor(py - r.y);
+            if (ix < 0 || iy < 0 || ix >= r.w || iy >= r.h) continue;
+            const v = r.hts[iy * r.w + ix];
+            if (v) return (v - 1) / 128 - 64;
+        }
+        return null;
+    }
+    /* the block the pointer is on: what that pixel shows, or else on REF_Y */
+    function toWorld(mx, my) {
+        const px = cx + (mx - W / 2) / zoom, py = cy + (my - H / 2) / zoom;
+        const y = heightAt(px, py);
+        if (y === null) return unproject(S, px, py, REF_Y).map(Math.floor);
+        return unproject(S, Math.floor(px) + 0.5, Math.floor(py) + 0.5, y - EPS).map(Math.floor);
+    }
 
     function resize() {
         dpr = window.devicePixelRatio || 1;
@@ -76,11 +113,20 @@ export function openPicker({ backend, world, jar, T, estimate, onBake }) {
             if (sel) {
                 const [x0, z0, x1, z1] = area();
                 const y = +ymin.value;
+                /* what the area takes, as it is: the rest dimmed */
+                highlight();
+                ctx.fillStyle = "rgba(10,12,16,.55)";
+                ctx.fillRect(0, 0, W, H);
+                for (const r of regions)
+                    if (r.hl) {
+                        const [x, y] = toScreen(r.x + r.hl.bx, r.y + r.hl.by);
+                        ctx.drawImage(r.hl.c, x, y, r.hl.c.width * zoom, r.hl.c.height * zoom);
+                    }
                 outline(x0, z0, x1 + 1, z1 + 1, y, "rgba(255,255,255,.9)", [4, 4]);
-                outline(x0, z0, x1 + 1, z1 + 1, REF_Y, "#e08a5a", []);
+                outline(x0, z0, x1 + 1, z1 + 1, refY, "#e08a5a", []);
                 ctx.beginPath();
                 for (const [x, z] of [[x0, z1 + 1], [x1 + 1, z1 + 1], [x1 + 1, z0]]) {
-                    ctx.moveTo(...toScreen(...project(S, x, REF_Y, z)));
+                    ctx.moveTo(...toScreen(...project(S, x, refY, z)));
                     ctx.lineTo(...toScreen(...project(S, x, y, z)));
                 }
                 ctx.strokeStyle = "rgba(255,255,255,.9)";
@@ -99,6 +145,54 @@ export function openPicker({ backend, world, jar, T, estimate, onBake }) {
                 }
             }
         });
+    }
+
+    /* Each region's pixels that show a block in the area, at or above
+       ymin, as a canvas of its picture's (r.hl), made again when the area
+       changes; and refY, the mean height they show, for the outline */
+    let hlKey = "";
+    function highlight() {
+        const [x0, z0, x1, z1] = area(), y0 = +ymin.value, key = [x0, z0, x1, z1, y0, regions.filter((r) => r.hts).length].join();
+        if (key === hlKey) return;
+        hlKey = key;
+        let sum = 0, n = 0;
+        /* the area's box on the picture plane, ymin to the top */
+        const pts = [];
+        for (const [x, z] of [[x0, z0], [x1 + 1, z0], [x0, z1 + 1], [x1 + 1, z1 + 1]]) pts.push(project(S, x, y0, z), project(S, x, 320, z));
+        const lo = [Math.min(...pts.map((p) => p[0])), Math.min(...pts.map((p) => p[1]))];
+        const hi = [Math.max(...pts.map((p) => p[0])), Math.max(...pts.map((p) => p[1]))];
+        for (const r of regions) {
+            r.hl = null;
+            if (!r.hts || !r.img) continue;
+            const bx = Math.max(0, Math.floor(lo[0] - r.x)), by = Math.max(0, Math.floor(lo[1] - r.y));
+            const ex = Math.min(r.w, Math.ceil(hi[0] - r.x)), ey = Math.min(r.h, Math.ceil(hi[1] - r.y));
+            if (bx >= ex || by >= ey) continue;
+            const bw = ex - bx, bh = ey - by, mask = new ImageData(bw, bh), m = mask.data;
+            let any = false;
+            for (let iy = 0; iy < bh; iy++) {
+                const py = r.y + by + iy + 0.5, row = (by + iy) * r.w + bx;
+                for (let ix = 0; ix < bw; ix++) {
+                    const v = r.hts[row + ix];
+                    if (!v) continue;
+                    const y = (v - 1) / 128 - 64 - EPS;
+                    if (y < y0) continue;
+                    const [x, z] = unproject(S, r.x + bx + ix + 0.5, py, y);
+                    if (x < x0 || x >= x1 + 1 || z < z0 || z >= z1 + 1) continue;
+                    m[(iy * bw + ix) * 4 + 3] = 255;
+                    sum += y; n++;
+                    any = true;
+                }
+            }
+            if (!any) continue;
+            const c = document.createElement("canvas");
+            c.width = bw; c.height = bh;
+            const g = c.getContext("2d");
+            g.putImageData(mask, 0, 0);
+            g.globalCompositeOperation = "source-in";
+            g.drawImage(r.img, -bx, -by);
+            r.hl = { c, bx, by };
+        }
+        if (!mode) refY = n ? Math.round(sum / n) : REF_Y; /* not while dragging: the handles would move under the pointer */
     }
 
     /* the rectangle x0..x1, z0..z1 at height y */
@@ -126,14 +220,14 @@ export function openPicker({ backend, world, jar, T, estimate, onBake }) {
         for (let i = 0; i < 3; i++)
             for (let j = 0; j < 3; j++)
                 if (i !== 1 || j !== 1)
-                    out.push({ fx: i === 1 ? null : i / 2, fz: j === 1 ? null : j / 2, p: toScreen(...project(S, xs[i], REF_Y, zs[j])) });
+                    out.push({ fx: i === 1 ? null : i / 2, fz: j === 1 ? null : j / 2, p: toScreen(...project(S, xs[i], refY, zs[j])) });
         return out;
     }
     const handleAt = (mx, my) => sel && handles().find((h) => (h.p[0] - mx) ** 2 + (h.p[1] - my) ** 2 < 12 * 12);
     function inside(mx, my) {
         if (!sel) return false;
-        const [x, z] = unproject(S, cx + (mx - W / 2) / zoom, cy + (my - H / 2) / zoom, REF_Y), [x0, z0, x1, z1] = area();
-        return x >= x0 && x < x1 + 1 && z >= z0 && z < z1 + 1;
+        const [x, z] = toWorld(mx, my), [x0, z0, x1, z1] = area();
+        return x >= x0 && x <= x1 && z >= z0 && z <= z1;
     }
 
     function showArea() {
@@ -168,6 +262,10 @@ export function openPicker({ backend, world, jar, T, estimate, onBake }) {
                 img.src = o.png;
                 if (o.png.startsWith("blob:")) urls.push(o.png);
                 await img.decode().catch(() => {});
+            }
+            if (o.w && o.hpng) {
+                if (o.hpng.startsWith("blob:")) urls.push(o.hpng);
+                r.hts = await heights(o.hpng, o.w, o.h).catch(() => null);
             }
             r.img = img;
         } catch (e) {
@@ -241,7 +339,7 @@ export function openPicker({ backend, world, jar, T, estimate, onBake }) {
         if (!pointers.size) {
             mode = null;
             grab = null;
-            if (sel) sel = area();
+            if (sel) { sel = area(); hlKey = ""; draw(); }
             loadNext();
         } else {
             const pts = [...pointers.values()];

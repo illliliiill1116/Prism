@@ -15,6 +15,7 @@ void *xmalloc(size_t n) {
 }
 
 int clip_on, clip[5];
+int window_part_on, window_part[4];
 static void clear_box(int x0, int z0, int x1, int z1, int ymin);
 
 /* "x0,z0,x1,z1,ymin" into clip, its corners put in order; 1 if it isn't */
@@ -165,6 +166,12 @@ void window_load(const char *rdir, int c0x, int c0z, canvas_t *atlas, long *lit,
     /* load the region plus MARGIN blocks around it */
     int cmin_x = c0x - MARGIN / 16, cmax_x = c0x + 32 + MARGIN / 16 - 1;
     int cmin_z = c0z - MARGIN / 16, cmax_z = c0z + 32 + MARGIN / 16 - 1;
+    if (window_part_on) {
+        if (cmin_x < window_part[0]) cmin_x = window_part[0];
+        if (cmin_z < window_part[1]) cmin_z = window_part[1];
+        if (cmax_x > window_part[2]) cmax_x = window_part[2];
+        if (cmax_z > window_part[3]) cmax_z = window_part[3];
+    }
     for (int rrz = cmin_z >> 5; rrz <= cmax_z >> 5; rrz++)
         for (int rrx = cmin_x >> 5; rrx <= cmax_x >> 5; rrx++) {
             char path[4096];
@@ -194,7 +201,8 @@ void window_load(const char *rdir, int c0x, int c0z, canvas_t *atlas, long *lit,
     for (int i = 0; i < HM_W * HM_W; i++) hm_top[i] = -1;
     for (int i = 0; i < HM_BW * HM_BW; i++) hm_big[i] = -1;
     for (size_t i = 0; i < nvox; i++)
-        if (states[grid[i]].occl || states[grid[i]].far_occl || states[grid[i]].up_lit || states[grid[i]].filters) {
+        if (!(i & 63) && grid_air64(i)) i += 63;
+        else if (states[grid[i]].occl || states[grid[i]].far_occl || states[grid[i]].up_lit || states[grid[i]].filters) {
             /* the heights (hm_skip, occ_top) take thin blockers, plants and filters too */
             if (states[grid[i]].occl) occl[i >> 6] |= 1ull << (i & 63);
             else if (states[grid[i]].far_occl) focc[i >> 6] |= 1ull << (i & 63);
@@ -211,7 +219,8 @@ void window_load(const char *rdir, int c0x, int c0z, canvas_t *atlas, long *lit,
      * cast no baked shade: a meadow would shade itself at a low sun; nor
      * do ones under water (kelp), which the water dims already */
     for (size_t i = 0; i < nvox; i++)
-        if (pocc[i >> 6] >> (i & 63) & 1) {
+        if (!(i & 63) && !pocc[i >> 6]) i += 63;
+        else if (pocc[i >> 6] >> (i & 63) & 1) {
             int y = (int)(i / ((size_t)GW * GW)), x = (int)(i % GW), z = (int)((i / GW) % GW);
             if (states[grid[i]].fluid || (y >= 1 && occ_at(x, y - 1, z)) ||
                 (y >= 2 && states[grid[gidx(x, y - 1, z)]].up_lit && occ_at(x, y - 2, z)))

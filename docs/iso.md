@@ -27,3 +27,25 @@ loading the world around each window.
 The output names the picture's corner in projected pixels (`sx = (x - z)
 S`, `sy = (x + z) S / 2 + (320 - y) S + S / 2`, S pixels a block), so
 pictures of neighbouring areas can be put together.
+
+With `--yaw`, the area is turned about its middle before it is projected,
+so the corner is in the turned projection and pictures put together this
+way have to share the yaw and the area's middle.
+
+## prism overview
+
+```bash
+build/prism overview <client.jar> <world> <out dir> <rx> <rz> [<rx> <rz>...] \
+    [--scale px] [--ymin y] [--threads n]
+```
+
+draws whole regions the same way but quickly: no cast shadows, the least
+bounced light, 2 pixels a block by default, about 2.5 s and 1.2 GB a region.
+Each region gives `r.<x>.<z>.png`, `r.<x>.<z>.h.png` (the world y each
+pixel shows, as `(y + 64) * 128 + 1` in red and green, so the picker knows
+which block a pixel is) and `r.<x>.<z>.json`, the pictures' corner in
+projected pixels and their size (`w` 0 and no pictures for an empty
+region). Drawn in order of `rx + rz`, each at its corner, they make the
+world without a seam: a region is drawn a quarter at a time, as iso draws
+an area, with the world around it and not cut at its edges. The app's
+area picker is made of them.

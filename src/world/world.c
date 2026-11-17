@@ -245,6 +245,7 @@ long propagate_block(void) {
     emv = NULL;
     memset(emc, 0, sizeof emc);
     for (size_t i = 0; i < nvox; i++) {
+        if (!(i & 63) && grid_air64(i)) { i += 63; continue; }
         int e = states[grid[i]].emit;
         if (!e) continue;
         if (!blkl) blkl = calloc(nvox, 1);
@@ -281,6 +282,7 @@ long propagate_block(void) {
                 memcpy(at, emc, sizeof at);
             }
             for (size_t i = 0; i < nvox; i++) {
+                if (!(i & 63) && grid_air64(i)) { i += 63; continue; }
                 int e = states[grid[i]].emit;
                 if (!e) continue;
                 int x = (int)(i % GW), z = (int)((i / GW) % GW), y = (int)(i / ((size_t)GW * GW));

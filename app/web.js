@@ -296,7 +296,10 @@ export async function webBackend() {
 
     /* The area picker's (picker.js): a world's regions, and one's picture
        (prism overview), kept in the storage for as long as the region file
-       is the same; one at a time, each taking a bake's memory. */
+       is the same; one at a time, each taking a bake's memory. OVERVIEW
+       goes up when prism overview draws differently, so the kept ones are
+       drawn again (prism serve goes by prism's own date instead). */
+    const OVERVIEW = 3;
     const overviews = await root.getDirectoryHandle("overviews", { create: true });
     let ovChain = Promise.resolve();
     async function overview(id, ver, rx, rz) {
@@ -304,14 +307,14 @@ export async function webBackend() {
         const f = world && regionsOf(world).get(`r.${rx}.${rz}.mca`);
         if (!f) return { error: "no such region" };
         const g = await gameJar(ver || world.info.version || "", () => {});
-        const key = `${encodeURIComponent(id)}/${g.ver}/r.${rx}.${rz}`, stamp = `${f.size}-${f.lastModified}`;
+        const key = `${encodeURIComponent(id)}/${g.ver}/r.${rx}.${rz}`, stamp = `${OVERVIEW}-${f.size}-${f.lastModified}`;
         const dir = await overviews.getDirectoryHandle(encodeURIComponent(id), { create: true });
         const vdir = await dir.getDirectoryHandle(g.ver, { create: true });
         const result = async () => {
             const js = JSON.parse(await readText(vdir, `r.${rx}.${rz}.json`));
             if (js.stamp !== stamp) return null;
-            const png = js.w ? await child(vdir, `r.${rx}.${rz}.png`) : null;
-            return { ...js, png: png ? URL.createObjectURL(await png.getFile()) : "" };
+            const png = js.w ? await child(vdir, `r.${rx}.${rz}.png`) : null, hpng = js.w ? await child(vdir, `r.${rx}.${rz}.h.png`) : null;
+            return { ...js, png: png ? URL.createObjectURL(await png.getFile()) : "", hpng: hpng ? URL.createObjectURL(await hpng.getFile()) : "" };
         };
         try { const r = await result(); if (r) return r; } catch {}
         const work = ovChain.then(async () => {
@@ -325,9 +328,11 @@ export async function webBackend() {
             const cores = navigator.hardwareConcurrency || 4, pool = Math.min(Math.max(cores, 16), 64);
             const r = await run({ args: ["overview", "/mc/game.jar", "/mc/region", "/out", String(rx), String(rz), "--threads", String(Math.min(cores, 16))],
                 files, collect: "/out", pool }, null, false);
-            const js = r.files.find((x) => x.path === `r.${rx}.${rz}.json`), png = r.files.find((x) => x.path === `r.${rx}.${rz}.png`);
+            const got = (n) => r.files.find((x) => x.path === n);
+            const js = got(`r.${rx}.${rz}.json`), png = got(`r.${rx}.${rz}.png`), hpng = got(`r.${rx}.${rz}.h.png`);
             if (r.code || !js) throw new Error("can't draw " + key);
             if (png) await writeFile(vdir, `r.${rx}.${rz}.png`, png.data);
+            if (hpng) await writeFile(vdir, `r.${rx}.${rz}.h.png`, hpng.data);
             const meta = { ...JSON.parse(new TextDecoder().decode(js.data)), stamp };
             await writeFile(vdir, `r.${rx}.${rz}.json`, JSON.stringify(meta));
         });

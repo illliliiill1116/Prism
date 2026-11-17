@@ -405,8 +405,8 @@ static atomic_flag ov_busy = ATOMIC_FLAG_INIT;
 
 /* GET overview?w=&jar=&r=rx,rz: a region's picture (prism overview), made
  * when there is none newer than the region file and prism, kept under
- * <data>/overviews/<world>/<version>/; its json with "png", the picture's
- * URL, added. */
+ * <data>/overviews/<world>/<version>/; its json with "png" and "hpng",
+ * the picture's URL and its heights', added. */
 static int api_overview(const char *q, str_t *o) {
     char w[512], ver[256], rs[64], world[4096], rdir[4096], jar[4096], dir[4096], js[4096], mca[4096];
     int rx, rz;
@@ -452,6 +452,9 @@ static int api_overview(const char *q, str_t *o) {
     sappend(o, "%s,\"png\":", text);
     char url[1024];
     snprintf(url, sizeof url, "overviews/%s/%s/r.%d.%d.png?%lld", w, ver, rx, rz, (long long)js_t);
+    json_str(o, url);
+    sappend(o, ",\"hpng\":");
+    snprintf(url, sizeof url, "overviews/%s/%s/r.%d.%d.h.png?%lld", w, ver, rx, rz, (long long)js_t);
     json_str(o, url);
     sappend(o, "}");
     return 200;

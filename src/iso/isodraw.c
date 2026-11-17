@@ -121,6 +121,7 @@ typedef struct {
     int shadows;
     float Vn[3];
     _Atomic uint8_t *seen; /* light_defer: per quad, it shows in the core's pixels */
+    double dw, sox, soy; /* world depth of local depth 0 (cx + cz); the window's corner, internal pixels */
 } iso_t;
 
 static float smoothstepf(float e0, float e1, float x) {
@@ -953,6 +954,29 @@ static void *draw_worker(void *arg) {
                     d[c] = (uint8_t)lrintf((v * a + d[c] * da * (1 - a)) / oa);
                 }
                 d[3] = (uint8_t)lrintf(oa * 255);
+                if (img->hts) {
+                    /* the nearest surface's depth (x + y + z) among the
+                     * samples drawn, and so its y at this pixel's centre */
+                    float best = -1e30f;
+                    for (int sy = 0; sy < ss; sy++)
+                        for (int sx = 0; sx < ss; sx++) {
+                            size_t i = (size_t)(r * ss + sy) * I->W + x * ss + sx;
+                            if (B->col[i * 4 + 3] <= 0) continue;
+                            float dd = B->dep[i] > B->wdep[i] ? B->dep[i] : B->wdep[i];
+                            if (B->gdep[i] > dd) dd = B->gdep[i];
+                            if (dd > best) best = dd;
+                        }
+                    if (best > -1e29f) {
+                        if (!img->hts[y]) {
+                            img->hts[y] = calloc((size_t)img->w, sizeof **img->hts);
+                            if (!img->hts[y]) { fprintf(stderr, "out of memory for the image\n"); exit(1); }
+                        }
+                        double S = (double)I->scale * ss, sy = I->soy + B->y0 + r * ss + ss * 0.5;
+                        double wy = (best + I->dw - 2 * (sy - S / 2) / S + 640) / 3;
+                        double v = (wy + 64) * 128 + 1;
+                        img->hts[y][gx] = (uint16_t)(v < 1 ? 1 : v > 65535 ? 65535 : lrint(v));
+                    }
+                }
                 if (gx < img->x0[y]) img->x0[y] = gx;
                 if (gx > img->x1[y]) img->x1[y] = gx;
             }
@@ -1016,6 +1040,8 @@ int iso_image_init(iso_image_t *img, int scale, double yaw, int x0, int z0, int 
 void iso_image_free(iso_image_t *img) {
     for (int y = 0; y < img->h; y++) free(img->rows[y]);
     free(img->rows); free(img->x0); free(img->x1);
+    if (img->hts) for (int y = 0; y < img->h; y++) free(img->hts[y]);
+    free(img->hts);
     memset(img, 0, sizeof *img);
 }
 
@@ -1043,6 +1069,38 @@ int iso_image_write(const iso_image_t *img, const char *path, int nthreads, long
             uint8_t *d = canvas_row(&band, (uint32_t)r);
             if (img->rows[y + r]) memcpy(d, img->rows[y + r] + (size_t)x0 * 4, (size_t)w * 4);
             else memset(d, 0, (size_t)w * 4);
+        }
+        canvas_t part = canvas_subview(&band, 0, 0, (uint32_t)w, (uint32_t)n);
+        png_stream_write_rows(st, &part);
+    }
+    canvas_free(&band);
+    png_result_t r = png_stream_finish(st);
+    if (r != PNG_OK) { fprintf(stderr, "can't write %s: %s\n", path, png_result_str(r)); return 1; }
+    return 0;
+}
+
+void iso_image_heights(iso_image_t *img) {
+    if (img->turned || img->hts) return;
+    img->hts = calloc((size_t)img->h, sizeof *img->hts);
+    if (!img->hts) { fprintf(stderr, "out of memory for the image\n"); exit(1); }
+}
+
+int iso_image_write_heights(const iso_image_t *img, const char *path, int nthreads, const long box[4]) {
+    if (!img->hts || box[2] <= 0) return 1;
+    int x0 = (int)(box[0] - img->ox), y0 = (int)(box[1] - img->oy), w = (int)box[2], h = (int)box[3];
+    png_stream_t *st = png_stream_begin(path, (uint32_t)w, (uint32_t)h, 6, nthreads);
+    if (!st) { fprintf(stderr, "can't write %s\n", path); return 1; }
+    enum { ROWS = 64 };
+    canvas_t band = canvas_create((uint32_t)w, ROWS);
+    for (int y = 0; y < h; y += ROWS) {
+        int n = h - y < ROWS ? h - y : ROWS;
+        for (int r = 0; r < n; r++) {
+            uint8_t *d = canvas_row(&band, (uint32_t)r);
+            const uint16_t *s = img->hts[y0 + y + r];
+            for (int x = 0; x < w; x++) {
+                uint16_t v = s ? s[x0 + x] : 0;
+                d[x * 4] = (uint8_t)(v >> 8); d[x * 4 + 1] = (uint8_t)v; d[x * 4 + 2] = 0; d[x * 4 + 3] = v ? 255 : 0;
+            }
         }
         canvas_t part = canvas_subview(&band, 0, 0, (uint32_t)w, (uint32_t)n);
         png_stream_write_rows(st, &part);
@@ -1106,6 +1164,7 @@ int iso_draw(iso_image_t *img, mbuf_t mb[MAT_COUNT], const canvas_t *atlas, cons
     I.W = ow * ss;
     I.H = oh * ss;
     double ox = (double)(img->ox + px0) * ss, oy = (double)(img->oy + py0) * ss;
+    I.dw = cx + cz; I.sox = ox; I.soy = oy;
     build_mip(&I);
     if (I.shadows) build_smap(&I, mb, nthreads);
     I.nq = q0[MAT_COUNT];
