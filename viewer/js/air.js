@@ -110,13 +110,13 @@ vec3 lightShafts(vec3 p0, vec3 p1) {
 			if (uRayMix > 0.0) v = mix(v, rayVis(tRay2, uRayMat2, p), uRayMix);
 			vis = mix(1.0, v, useMap);
 		}
-		float mist = min(exp(-clamp((p.y - uMistY) / ${MIST_H.toFixed(1)}, -3.0, 40.0)), 8.0);
+		float mist = exp(-clamp((p.y - uMistY) / ${MIST_H.toFixed(1)}, 0.0, 40.0)); /* as fog_fragment's */
 		sum += vis * (1.0 + ${(5 * MIST).toFixed(2)} * mist) * ds;
 	}
 	return uRayCol * phase * sum * shade * ${(RAY_DENS * RAYS).toFixed(6)};
 }`;
     /* Haze: distance fog (past what the camera is looking at, however far out
-     * it is) plus ground mist - air denser below MIST_Y + a few MIST_H,
+     * it is) plus ground mist - air denser up to MIST_Y + a few MIST_H,
      * integrated along each view ray, so valleys and water fill with it while
      * the map seen from above stays clear (?mist=, 0 = none). Hazed colour
      * also loses saturation before it turns to the horizon colour. */
@@ -138,11 +138,14 @@ ${RAYS > 0 ? RAY_GLSL : "uniform float uMistY;"}
 	{
 		const float k = 1.0 / ${MIST_H.toFixed(1)};
 		vec3 rd = vFogWorld - cameraPosition;
-		float e0 = exp(-clamp((cameraPosition.y - uMistY) * k, -3.0, 40.0));
-		float e1 = exp(-clamp((vFogWorld.y - uMistY) * k, -3.0, 40.0));
-		/* mean of exp(-(y - uMistY) / MIST_H) along the ray */
-		float dyk = rd.y * k;
-		float mean = abs(dyk) > 1e-3 ? (e0 - e1) / dyk : e0;
+		/* mean of the mist's density along the ray: 1 up to uMistY, the
+		   water it lies on, and exp(-(y - uMistY) / MIST_H) above. Not
+		   thicker still under that level: a valley below a map's water
+		   (a mountain lake's) whited out, and the nearer ground stood
+		   against it with a hard edge */
+		float ya = min(cameraPosition.y, vFogWorld.y), yb = max(cameraPosition.y, vFogWorld.y), h = yb - ya;
+		float ea = exp(-clamp((ya - uMistY) * k, 0.0, 40.0)), eb = exp(-clamp((yb - uMistY) * k, 0.0, 40.0));
+		float mean = h * k < 1e-3 ? ea : (clamp(uMistY - ya, 0.0, h) + (ea - eb) / k) / h;
 		float mist = 1.0 - exp(-${(0.0016 * MIST).toFixed(5)} * length(rd) * mean);
 		float fogFactor = 1.0 - (1.0 - smoothstep(fogNear, fogFar, vFogDepth)) * (1.0 - mist);
 		float Y = dot(gl_FragColor.rgb, vec3(0.2126, 0.7152, 0.0722));
