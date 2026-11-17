@@ -6,114 +6,94 @@ torches and lanterns, and sunlight bounced off nearby faces. It reads the
 blocks and textures from the client jar, bakes on the CPU only, and writes a
 static site.
 
-Experimental, and rough in places:
+![A house on a hillside by a pond at night, baked on its own as a diorama](docs/demo.webp)
 
-- Water is naive: a flat surface with made-up ripples, which mirrors only
-  what is on the screen (and the sky where that runs out).
-- The haze and the ground mist are tuned by eye on a few maps; close to
-  the water they can be too thick.
-- Far off, the map turns into coarse cells of mean colour, so distant
-  views are blocky.
-- Mobs, item frames, paintings and the text on signs are not drawn, and
-  moving blocks are shown still (see [Limitations](#limitations)).
-- It has mostly been tried in Chrome, and a bake takes up to 2 GB of
-  memory.
+The demo, viewed in real time in Chrome.
 
-The output has a format number. When an update changes it, the viewer says
-so and the map has to be baked again.
+- **[Demo](https://illliliiill1116.github.io/Prism/demo/)**: a piece of a
+  world, baked on its own, in the viewer.
+- **[Bake your own world](https://illliliiill1116.github.io/Prism/app/)**:
+  the app in the browser, nothing to install (Chrome or Edge).
 
-<p>
-  <img src="docs/ihou-lanterns.webp" alt="Lanterns and lit windows" width="49%">
-  <img src="docs/ihou-airships.webp" alt="Airships" width="49%">
-</p>
+prism is experimental and rough in places: see
+[Limitations](#limitations). More pictures, of a big build, are under
+[License](#license).
 
-Viewed in real time in Chrome.
+## Getting started
 
-- **[Demo](https://illliliiill1116.github.io/Prism/demo/)**: a piece of a world, baked on its own, in the viewer.
-- **[Bake your own world](https://illliliiill1116.github.io/Prism/app/)**: the app in the browser, no install
-  (Chrome or Edge).
+There are three ways to use it, all with the same baker:
 
-The map in them is "IHOU", not part of this project (see [License](#license)).
+| | How | Where the maps go |
+|---|---|---|
+| [In the browser](#in-the-browser) | Open the [app](https://illliliiill1116.github.io/Prism/app/) and drop a world folder on it | The browser's own storage |
+| [The app](#the-app) | [Build](#building) `prism` and run it with no arguments (`prism.exe` on Windows) | A folder on this computer |
+| [The command line](#baking-a-world) | `prism map <client.jar> <world> <out dir>` | Wherever you say |
 
-## The app (no commands)
+Each way gives a map that is a static website: put it on any web host
+to share it ([Viewing](#viewing)), or use the app's **Export** to get it
+as a zip.
+
+## The app
 
 Run `prism` with no arguments (on Windows, double-click `prism.exe`). It
 opens a page in the browser that lists the worlds in Minecraft's saves
-folder and the maps baked so far. Pick a world and which installed game
-version's textures to use, then "Choose an area…": the world is drawn
-region by region in 2.5D (`prism overview`), and dragging on it from one
-corner to the other picks the area, with a slider for how deep the ground
-is cut. It bakes just that (`prism map --clip`), a map of its own, in
-seconds for a building or a village. Whole regions around the spawn, or
-all of the world, can still be baked too. Open a map to see it in the
-viewer, in a new tab. "Update" bakes again only what changed in the world since. "Export"
-downloads a map as a website in a zip: the viewer, a page and the map,
-to unzip onto any web host (see [Viewing](#viewing)) or pass on. The page
-opens where the map was last left in the viewer (the camera, the time of
-day and the camera panel's settings), so frame the build there first. "Folder"
-shows a map's files in the file manager, "Delete" removes the map (not the
-world).
+folder and the maps baked so far.
 
-It is a small web server on this computer only (`127.0.0.1`, port 8820 or
-the next free one), with the page and the viewer built in. It stops when
-its window is closed. The maps go to `%LOCALAPPDATA%\Prism\maps` on
-Windows and `~/.local/share/prism/maps` elsewhere, one folder per world,
-each a map as `prism map` makes it (so it can be put on a website as it
-is, see [Viewing](#viewing)). The viewer loads three.js from jsDelivr, so
-the page needs the internet.
+1. Pick a world, and which installed game version's textures to use.
+2. **Choose an area…** draws the world region by region in 2.5D (with
+   `prism overview`). Drag from one corner to the other to pick the area:
+   it lights up block by block as it will be baked, the rest dimmed. A
+   slider sets how deep the ground is cut, and what it cuts away dims too.
+3. It bakes just that (`prism map --clip`), as a map of its own: seconds
+   for a building or a village. Whole regions around the spawn, or all of
+   the world, can be baked too.
+
+For each map:
+
+- **Open** shows it in the viewer, in a new tab.
+- **Update** bakes again only what changed in the world since.
+- **Export** downloads it as a website in a zip (the viewer, a page and
+  the map) to unzip onto any web host or pass on. The page opens where
+  the map was last left in the viewer (the camera, the time of day and
+  the camera panel's settings), so frame the build there first.
+- **Folder** shows its files in the file manager.
+- **Delete** removes the map (not the world).
+
+The app is a small web server on this computer only (`127.0.0.1`, port
+8820 or the next free one), with the page and the viewer built in. It
+stops when its window is closed. The maps go to `%LOCALAPPDATA%\Prism\maps`
+on Windows and `~/.local/share/prism/maps` elsewhere, one folder per world,
+each a map as `prism map` makes it. The viewer loads three.js from
+jsDelivr, so the page needs the internet.
 
 ```bash
 build/prism serve [--port n] [--mc dir] [--data dir] [--no-open]
 ```
 
 `--mc` is Minecraft's folder (by default `%APPDATA%\.minecraft` or
-`~/.minecraft`), `--data` where the maps go, `--no-open` leaves the
+`~/.minecraft`), `--data` where the maps go, and `--no-open` leaves the
 browser alone.
 
 ## In the browser
 
-The same app runs with no program to install: put `build-web/` on any
-static host (GitHub Pages too) and open it in Chrome or Edge. Drop a world
+The same app runs with nothing to install: put `build-web/` on any static
+host (GitHub Pages too) and open it in Chrome or Edge, or use the
+[one above](https://illliliiill1116.github.io/Prism/app/). Drop a world
 folder on the page (or the whole `saves` folder), or choose one with the
 button. It bakes in the page with prism built for the browser, and keeps
-the maps in the browser's own storage; nothing is uploaded. The textures
-come from Mojang's servers (the client jar of the world's version, about
-40 MB, downloaded once). Chrome won't let a page pick a folder in
-`AppData`, so the page can't be given `.minecraft` itself, and the world
-has to be dropped again to update its map.
+the maps in the browser's own storage; nothing is uploaded.
 
-A service worker (`sw.js`) serves the maps to the viewer and gives the
-pages the headers prism's threads need, so the first visit reloads once.
-A bake there takes about 1.1 to 1.4 times as long as the native one and up
-to about 1.7 GB of memory a region. "Export" gets a map out of the
-browser, as a website in a zip like the app's, and "Delete" frees the
-space it takes there.
-
-## Building
-
-Requires Linux, GCC (C11), GNU make and zlib (`sudo apt install
-build-essential zlib1g-dev` on Debian / Ubuntu).
-
-```bash
-make
-```
-
-This builds `build/prism`, `build/skinlist` and the libraries under
-`libs/` they use. The default flags include `-march=native`.
-
-`make win` cross-builds `build-win/prism.exe` for Windows 10 and later
-with MinGW-w64 (`sudo apt install gcc-mingw-w64-x86-64
-libz-mingw-w64-dev`): one file, everything linked in, for any x86-64 CPU
-from about 2009 on (`-march=x86-64-v2`). Windows 11's Smart App Control
-refuses to run it unless it is signed.
-
-`make web` builds the app as a static site in `build-web/`, with prism
-itself built from the same sources for the browser (Emscripten, emsdk on
-the `PATH`): see [In the browser](#in-the-browser). `make wasm` builds it
-to run under Node instead, as the command does. `scripts/wasm_check.sh <jar> <world> <rx>
-<rz>` bakes a region with both builds and checks they come out the same
-(the atlas's pixels and every tile decompressed; the compressed bytes may
-differ, each build having its own zlib).
+- The textures come from Mojang's servers: the client jar of the world's
+  version, about 40 MB, downloaded once.
+- Chrome won't let a page pick a folder in `AppData`, so the page can't be
+  given `.minecraft` itself, and the world has to be dropped again to
+  update its map.
+- A service worker (`sw.js`) serves the maps to the viewer and gives the
+  pages the headers prism's threads need, so the first visit reloads once.
+- A bake takes about 1.1 to 1.4 times as long as the native one, and up to
+  about 1.7 GB of memory a region.
+- **Export** gets a map out of the browser, as a website in a zip like the
+  app's, and **Delete** frees the space it takes there.
 
 ## Baking a world
 
@@ -124,65 +104,34 @@ build/prism map ~/.minecraft/versions/26.2/26.2.jar \
 
 This bakes each region file into `out/mymap/r.<x>.<z>/` and lists them in
 `out/mymap/map.json`. The second argument is the world's folder or the
-folder of its overworld's region files. `--threads n` sets the thread
-count (default: all cores). `--near x,z,r` bakes only the regions within
-`r` regions of the one block `x, z` is in. `--clip x0,z0,x1,z1,ymin`
-bakes only the box between blocks `x0, z0` and `x1, z1`, from `ymin` up,
-as if nothing else were there: a diorama with its sides cut open and lit.
-Changing the box does not count as a change: bake it into a new folder. A region file or chunk that cannot be read (a
-damaged save) is left empty, with a warning.
+folder of its overworld's region files.
 
-Run it again after the world has changed and it bakes only what changed.
-That is each region whose file changed, plus each neighbour whose margin
-holds a changed chunk (by the chunk timestamps in the region files). If
-`prism` was rebuilt, it bakes everything. Each bake goes to a new folder
-that replaces the old one once it is done, so a map being served is never
-half updated. A viewer that is open at the time notices (by `tiles.bin`'s
+| Option | |
+|---|---|
+| `--threads n` | Thread count (default: all cores) |
+| `--near x,z,r` | Only the regions within `r` regions of the one block `x, z` is in |
+| `--clip x0,z0,x1,z1,ymin` | Only the box between blocks `x0, z0` and `x1, z1`, from `ymin` up, as if nothing else were there: a diorama with its sides cut open and lit. Changing the box does not count as a change: bake it into a new folder |
+
+A region file or chunk that cannot be read (a damaged save) is left empty,
+with a warning.
+
+Run it again after the world has changed and it bakes only what changed:
+each region whose file changed, plus each neighbour whose margin holds a
+changed chunk (by the chunk timestamps in the region files). If `prism`
+was rebuilt, it bakes everything. Each bake goes to a new folder that
+replaces the old one once it is done, so a map being served is never half
+updated. A viewer that is open at the time notices (by `tiles.bin`'s
 `Last-Modified`, or its index having changed) and loads the region again.
 A region with nothing new in the same second as its bake started may be
 baked once more on the next run.
+
+The output has a format number. When an update changes it, the viewer says
+so and the map has to be baked again.
 
 Player heads show their skins when the skins are on disk.
 `scripts/fetch_skins.sh <region dir> out/skins` downloads them from
 `textures.minecraft.net`. The bake itself never goes online; a head whose
 skin is missing keeps its block's own texture.
-
-## A picture instead (2.5D)
-
-![A savanna village by a jungle at sunset, in 2.5D](docs/iso-village.webp)
-
-A savanna village in a survival world at sunset, a 290 x 280-block area
-drawn with `--scale 8 --ss 2 --ymin 48 --sun 160` in about 2.5 s (scaled
-down here). Inset, one of its houses in the morning, with `--scale 32 --ss 2
---sun 50`.
-
-```bash
-build/prism iso ~/.minecraft/versions/26.2/26.2.jar \
-    ~/.minecraft/saves/MyWorld -300 -300 300 300 area.png --scale 4
-```
-
-draws the world from x, z = -300, -300 to 300, 300 (both corners inside)
-as an isometric PNG on the CPU, with the same mesh and baked light as the
-viewer at one time of day. How it is drawn, its memory use, and how to put
-neighbouring pictures together: [docs/iso.md](docs/iso.md).
-
-`--yaw deg` turns the area about its middle first (0 is the view above;
-any angle).
-
-`prism overview <client.jar> <world> <out dir> <rx> <rz> [<rx> <rz>...]`
-draws whole regions the same way but quickly (no cast shadows, 2 pixels a
-block by default, about 2 s and 1.8 GB a region), one picture and one json
-of where it goes each, for the app's area picker.
-
-| Option | |
-|---|---|
-| `--sun deg` | The sun along its arc: 0 sunrise, 90 noon, 180 sunset, past that the moon (default 136.4) |
-| `--scale px` | Pixels a block, 1-64 (default 16); below 16 the textures are filtered down |
-| `--ss n` | n x n samples a pixel, 1-4 (default 1): smoother edges |
-| `--ymin y` | The lowest level drawn (default -64, the world's bottom) |
-| `--bounce-rays n` | Rays the bounced sun is gathered over at each corner, 1-48 (default 16; the bake's 48 is a little smoother and slower) |
-| `--threads n` | Default 16 |
-| `--noshadow` | Baked shadows only, no shadow map |
 
 ## Viewing
 
@@ -205,26 +154,6 @@ locally but wasteful over the internet.
 To put the viewer in a page of your own, or serve the map from another
 site, see [docs/embedding.md](docs/embedding.md).
 
-### The demo site
-
-```bash
-scripts/demo.sh <client.jar> <world dir> <x0,z0,x1,z1,ymin> \
-    [--out dir] [--title text] [--cam x,y,z --at x,y,z] [--sun deg]
-```
-
-bakes the box with `--clip` into `build-demo/` (or `--out`), with the
-viewer and a page of its own (`viewer/site.html`, the one Export uses,
-without its caption), the browser tab titled with the world's name. The page starts at `--cam` looking at `--at`, or else from above
-the box's north-west corner. It is a static site of its own, apart from
-the app's `build-web/`. `scripts/pages.sh` puts the two on the
-`gh-pages` branch, the app under `app/` and the demo under `demo/`, as
-one commit that replaces the last (then `git push -f origin gh-pages`). The demo linked above is
-
-```bash
-scripts/demo.sh 26.2.jar "New World" 1267,1003,1315,1045,35 \
-    --cam 1315,81.5,1038.2 --at 1292.7,68,1027.6
-```
-
 ### Controls
 
 - Drag to orbit, right-drag to pan, and use the wheel (or the bar on the
@@ -237,8 +166,9 @@ scripts/demo.sh 26.2.jar "New World" 1267,1003,1315,1045,35 \
   the speed.
 - In fly mode, **G** walks: you fall to the ground and bump into blocks,
   step up slabs and stairs, Space jumps (and swims, and climbs ladders and
-  vines), W pressed twice or Shift runs, moving as in Minecraft. **G** again flies. A map baked before walking was
-  added has nothing to walk on: bake it again.
+  vines), and W pressed twice or Shift runs, moving as in Minecraft. **G**
+  again flies. A map baked before walking was added has nothing to walk
+  on: bake it again.
 - The time-of-day bar at the top left sets the sun (06:00 sunrise, 18:00
   sunset, the moon by night); **[** and **]** step it, and **T** or ▶ lets
   the day go by.
@@ -248,8 +178,8 @@ scripts/demo.sh 26.2.jar "New World" 1267,1003,1315,1045,35 \
   balance and aperture.
 - **P** saves a photo, up to 4× the screen size. **H** hides the controls.
   **?** or the ? button lists all of this.
-- The corner button puts the viewer full screen (where a browser cannot, as on
-  an iPhone, it fills the window); Esc leaves.
+- The corner button puts the viewer full screen (where a browser cannot,
+  as on an iPhone, it fills the window); Esc leaves.
 
 ### URL parameters
 
@@ -271,6 +201,64 @@ place. Embedded, the same names are `createViewer`'s options.
 | `pr=`, `budget=` | Fixed pixel ratio; most quads drawn, in millions (8; 2 on a phone or with 4 GB or less) |
 | `diag`, `diag&bench` | Diagnostics on screen; with `bench`, frame timings once the tiles are in |
 | `glb=<file>` | A single region's `region.glb` (from `prism bake ... glb`) instead of a map |
+
+## A picture instead (2.5D)
+
+![A savanna village by a jungle at sunset, in 2.5D](docs/iso-village.webp)
+
+A savanna village in a survival world at sunset, a 290 x 280-block area
+drawn with `--scale 8 --ss 2 --ymin 48 --sun 160` in about 2.5 s (scaled
+down here). Inset, one of its houses in the morning, with `--scale 32 --ss 2
+--sun 50`.
+
+```bash
+build/prism iso ~/.minecraft/versions/26.2/26.2.jar \
+    ~/.minecraft/saves/MyWorld -300 -300 300 300 area.png --scale 4
+```
+
+draws the world from x, z = -300, -300 to 300, 300 (both corners inside)
+as an isometric PNG on the CPU, with the same mesh and baked light as the
+viewer at one time of day.
+
+| Option | |
+|---|---|
+| `--sun deg` | The sun along its arc: 0 sunrise, 90 noon, 180 sunset, past that the moon (default 136.4) |
+| `--scale px` | Pixels a block, 1-64 (default 16); below 16 the textures are filtered down |
+| `--ss n` | n x n samples a pixel, 1-4 (default 1): smoother edges |
+| `--ymin y` | The lowest level drawn (default -64, the world's bottom) |
+| `--yaw deg` | Turn the area about its middle first (0 is the usual view; any angle) |
+| `--bounce-rays n` | Rays the bounced sun is gathered over at each corner, 1-48 (default 16; the bake's 48 is a little smoother and slower) |
+| `--threads n` | Default 16 |
+| `--noshadow` | Baked shadows only, no shadow map |
+
+How it is drawn, its memory use, how to put neighbouring pictures
+together, and `prism overview` (whole regions drawn quickly, for the app's
+area picker): [docs/iso.md](docs/iso.md).
+
+## Building
+
+Requires Linux, GCC (C11), GNU make and zlib (`sudo apt install
+build-essential zlib1g-dev` on Debian / Ubuntu).
+
+```bash
+make
+```
+
+This builds `build/prism`, `build/skinlist` and the libraries under
+`libs/` they use. The default flags include `-march=native`.
+
+| Target | Builds | Needs |
+|---|---|---|
+| `make win` | `build-win/prism.exe` for Windows 10 and later: one file, everything linked in, for any x86-64 CPU from about 2009 on (`-march=x86-64-v2`) | MinGW-w64 (`sudo apt install gcc-mingw-w64-x86-64 libz-mingw-w64-dev`) |
+| `make web` | The app as a static site in `build-web/`, with prism built from the same sources for the browser ([In the browser](#in-the-browser)) | Emscripten (emsdk on the `PATH`) |
+| `make wasm` | The same for Node, run as the command is | Emscripten |
+
+Windows 11's Smart App Control refuses to run `prism.exe` unless it is
+signed.
+
+How the source is laid out, checking the browser build against the native
+one, and how the demo and the GitHub Pages site are made:
+[docs/developing.md](docs/developing.md).
 
 ## How it works
 
@@ -300,7 +288,7 @@ What a bake writes, and how it finds the water level and leaves out caves:
 Measured on an AMD Ryzen 7 9800X3D (8 cores, 16 threads) under WSL2 with
 15 GB of memory, baking every region of the world with `prism map`:
 
-| | IHOU (the pictures above) | A survival world |
+| | IHOU (the pictures under License) | A survival world |
 |---|---|---|
 | What it is | One dense build, from the water at y 5 up to y 255, on a flat world | Natural terrain |
 | Regions | 25 (1 with the build) | 35 |
@@ -317,11 +305,16 @@ The viewer downloads only what it shows: on a 4-region test map, opening
 on an overview took 7–37 MB, depending on the view, and getting closer
 downloads more of what is near.
 
-Where things are in the source: [docs/developing.md](docs/developing.md).
-
 ## Limitations
 
-- Built on Linux (also for Windows, see [Building](#building)); macOS untested. Overworld only.
+- Built on Linux (also for Windows, see [Building](#building)); macOS
+  untested. Mostly tried in Chrome. Overworld only.
+- Water is naive: a flat surface with made-up ripples, which mirrors only
+  what is on the screen (and the sky where that runs out).
+- The haze and the ground mist are tuned by eye on a few maps; close to
+  the water they can be too thick.
+- Far off, the map turns into coarse cells of mean colour, so distant
+  views are blocky.
 - Entities (mobs, item frames, paintings, armour stands, boats, minecarts)
   are not drawn, nor is the text on signs.
 - Barriers, light blocks and structure voids are not drawn; they are
@@ -345,6 +338,11 @@ Where things are in the source: [docs/developing.md](docs/developing.md).
 
 The code is under the MIT License (`LICENSE`). The IHOU pictures in
 `docs/` are not: they show a map made by others, under its own terms.
+
+<p>
+  <img src="docs/ihou-lanterns.webp" alt="Lanterns and lit windows" width="49%">
+  <img src="docs/ihou-airships.webp" alt="Airships" width="49%">
+</p>
 
 ![IHOU at night, the whole build](docs/ihou-overview.webp)
 
