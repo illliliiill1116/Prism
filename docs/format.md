@@ -37,4 +37,5 @@ the game's usual height (y 62) is not buried in mist. A map without it
 Caves are left out, as BlueMap does: unlit spaces below y 55, 7 under the
 usual sea. Where a region's water is lower, the cut follows it down (never
 up), so the closed rooms of a town built on an old superflat world at y 5
-are kept.
+are kept. The sky's light gets past slabs and stairs, so a roof of them
+is never taken for a cave's ceiling.

@@ -180,7 +180,18 @@ static uint32_t *grow_ring(uint32_t *q, size_t *cap, size_t *h, size_t *t) {
     return nq;
 }
 
-/* Seeds: open voxels in direct sky light next to an open voxel that is
+/* What stops the sky light: a whole occluding block. A slab or a stair
+ * lets it in (its own voxel is half open), as do the voxels under it: the
+ * light here only says what is a cave, and a roof of slabs over the
+ * world's floor is not one. */
+static inline int sky_block(int x, int y, int z) {
+    if (!occ_at(x, y, z)) return 0;
+    const state_t *s = &states[gget(x, y, z)];
+    return !s->shape || s->shape->full_cube;
+}
+
+/* Seeds: each column from its top occluder down through what lets the sky
+ * in, and open voxels in direct sky light next to an open voxel that is
  * not (under an overhang, at a cave mouth). BFS from there. */
 long propagate_sky(void) {
     size_t nvox = (size_t)GW * GW * GH;
@@ -208,6 +219,10 @@ long propagate_sky(void) {
                 if (coltop[nz * GW + nx] > hi) hi = coltop[nz * GW + nx];
             }
             for (int y = top + 1; y <= hi && y < GH; y++) PUSH(gidx(x, y, z));
+            for (int y = top; y >= 0 && !sky_block(x, y, z); y--) {
+                sky_set(gidx(x, y, z), 15);
+                PUSH(gidx(x, y, z));
+            }
         }
     long visited = 0;
     while (qh != qt) {
@@ -218,7 +233,7 @@ long propagate_sky(void) {
         for (int d = 0; d < 6; d++) {
             int nx = x + D[d][0], ny = y + D[d][1], nz = z + D[d][2];
             if (nx < 0 || nz < 0 || nx >= GW || nz >= GW || ny < 0 || ny >= GH) continue;
-            if (ny > coltop[nz * GW + nx] || occ_at(nx, ny, nz)) continue;
+            if (ny > coltop[nz * GW + nx] || sky_block(nx, ny, nz)) continue;
             size_t j = gidx(nx, ny, nz);
             if (((skyl[j >> 1] >> ((j & 1) * 4)) & 15) >= lv - 1) continue;
             sky_set(j, lv - 1);

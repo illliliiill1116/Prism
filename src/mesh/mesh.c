@@ -459,7 +459,13 @@ static void mesh_block_inner(worker_t *w, int gx, int gy, int gz, uint16_t id) {
                           (f == FACE_NORTH && e->z0 <= 0) || (f == FACE_SOUTH && e->z1 >= 16) ||
                           (f == FACE_EAST && e->x1 >= 16) || (f == FACE_WEST && e->x0 <= 0);
             if (on_edge && e->rot_angle == 0 && !e->has_xf && face_hidden(id, gx, gy, gz, f)) continue;
-            if (on_edge ? is_cave(gx + DIRV[f][0], gy + DIRV[f][1], gz + DIRV[f][2]) : is_cave(gx, gy, gz)) continue;
+            /* a face inside the voxel is in a cave only if the voxel is and
+             * so is the one it looks to: a slab or a stair blocks the sky
+             * light into its own voxel, so its top under open sky would
+             * read as a cave on its own */
+            if (on_edge ? is_cave(gx + DIRV[f][0], gy + DIRV[f][1], gz + DIRV[f][2])
+                        : is_cave(gx, gy, gz) && is_cave(gx + DIRV[f][0], gy + DIRV[f][1], gz + DIRV[f][2]))
+                continue;
             float q[4][3];
             box_face(f, box, q);
             if (e->rot_angle != 0) rotate_pts(q, e->rot_axis, e->rot_angle, e->rot_origin, e->rot_rescale);
