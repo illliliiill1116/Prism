@@ -8,20 +8,44 @@
  * Each region is drawn a quarter at a time, each loaded as a window with
  * the world around it, as iso draws an area: cut at ymin but not at the
  * region's edges, so the pictures of neighbours meet without a seam (no cut
- * walls, and the water at the edges sees the ground under it). With the sun
- * but no cast shadows and the least bounced light. It writes <out>/r.<x>.<z>.png,
- * r.<x>.<z>.h.png, the world y each pixel shows (iso_image_write_heights),
- * and r.<x>.<z>.json: {"scale", "ymin", "x", "y", "w", "h"}, the
- * pictures' corner in projected pixels (iso_project) and their size, w 0
- * and no pictures when the region has nothing in it. Pictures of neighbours drawn
- * in that order by rx + rz, each at its corner, make the world.
+ * walls, and the water at the edges sees the ground under it). The cut is
+ * at y 0, or lower where the ground is (a world built below 0): 8 under a
+ * quarter's ground, the lowest tenth of its columns' tops. --ymin sets it
+ * instead. With the sun but no cast shadows and the least bounced light.
+ * It writes <out>/r.<x>.<z>.png, r.<x>.<z>.h.png, the world y each pixel
+ * shows (iso_image_write_heights), and r.<x>.<z>.json: {"scale", "ymin"
+ * (the lowest cut), "ground" (the lowest quarter's, 63 if none), "x", "y",
+ * "w", "h"}, the pictures' corner in projected pixels (iso_project) and
+ * their size, w 0 and no pictures when the region has nothing in it.
+ * Pictures of neighbours drawn in that order by rx + rz, each at its
+ * corner, make the world.
  */
 #include "cli.h"
+#include <limits.h>
 
 #define Q 16   /* a quarter's side, in chunks: drawn at once */
 #define BACK 4 /* and meshed behind it: what its water looks down to (iso.c's BACK) */
 
 static int write_text(const char *path, const char *s) { return write_atomic(path, s, strlen(s)); }
+
+/* The ground of the window's quarter at qx, qz (chunks), loaded: the
+ * lowest tenth of its columns' tops, world y; INT_MAX if it has none */
+static int ground_of(int qx, int qz) {
+    static int count[GH + 1];
+    memset(count, 0, sizeof count);
+    int n = 0;
+    for (int z = 0; z < Q * 16; z++)
+        for (int x = 0; x < Q * 16; x++) {
+            int gx = qx * 16 + x - reg_x0, gz = qz * 16 + z - reg_z0;
+            int t = coltop[gz * GW + gx];
+            if (t >= 0) { count[t]++; n++; }
+        }
+    if (!n) return INT_MAX;
+    int y = 0;
+    for (int seen = 0; y < GH; y++)
+        if ((seen += count[y]) * 10 >= n) break;
+    return y + YMIN;
+}
 
 int cmd_overview(int argc, char **argv) {
     const char *usage = "usage: prism overview <client.jar> <world or region dir> <out dir> <rx> <rz> [<rx> <rz>...]\n"
@@ -31,14 +55,14 @@ int cmd_overview(int argc, char **argv) {
     char rdir[4096];
     region_dir(argv[2], rdir, sizeof rdir);
     iso_opts_t o = { .scale = 2, .ss = 1, .shadows = 0, .threads = plat_ncpu(), .sun = 136.4f };
-    int ymin = 0, n = 0;
+    int ymin = 0, fixed = 0, n = 0;
     static int regs[4096][2];
     for (int i = 4; i < argc; i++) {
         const char *a = argv[i], *v = i + 1 < argc ? argv[i + 1] : NULL;
         if (a[0] == '-' && a[1] == '-') {
             if (!v) { fputs(usage, stderr); return 2; }
             if (!strcmp(a, "--scale")) o.scale = atoi(v);
-            else if (!strcmp(a, "--ymin")) ymin = atoi(v);
+            else if (!strcmp(a, "--ymin")) ymin = atoi(v), fixed = 1;
             else if (!strcmp(a, "--threads")) o.threads = atoi(v);
             else { fprintf(stderr, "unknown option %s\n%s", a, usage); return 2; }
             i++;
@@ -69,7 +93,7 @@ int cmd_overview(int argc, char **argv) {
         char path[4096], json[256];
         long box[4] = { 0, 0, 0, 0 }, quads = 0;
         iso_image_t img;
-        int made = !iso_image_init(&img, o.scale, 0, x0, z0, x1, z1, ymin), bad = !made;
+        int made = !iso_image_init(&img, o.scale, 0, x0, z0, x1, z1, fixed ? ymin : YMIN), bad = !made, low = ymin, ground = INT_MAX;
         if (made) iso_image_heights(&img);
         /* a quarter of the region at a time, back (-x, -z) to front, each
          * loaded with BACK chunks behind it meshed too: what its water looks
@@ -90,7 +114,11 @@ int cmd_overview(int argc, char **argv) {
             window_part[3] = qz + Q - 1 + MARGIN / 16;
             window_load(rdir, qx - BACK, qz - BACK, &atlas, &lit, &emitters);
             /* only below ymin: the world around stays, so the edges aren't cut */
-            window_clear_outside(x0 - REG, z0 - REG, x1 + REG, z1 + REG, ymin);
+            int g = chunks_loaded ? ground_of(qx, qz) : INT_MAX, cut = ymin;
+            if (g < ground) ground = g;
+            if (!fixed && g != INT_MAX && g - 8 < cut) cut = g - 8 < YMIN ? YMIN : g - 8;
+            if (cut < low) low = cut;
+            window_clear_outside(x0 - REG, z0 - REG, x1 + REG, z1 + REG, cut);
             for (int c = 0; c < 32 * 32; c++) mesh_skip[c] = c % 32 >= BACK + Q || c / 32 >= BACK + Q;
             lod_mode = 0;
             if (chunks_loaded) {
@@ -121,8 +149,8 @@ int cmd_overview(int argc, char **argv) {
             box[2] = 0;
         }
         if (made) iso_image_free(&img);
-        snprintf(json, sizeof json, "{\"scale\":%d,\"ymin\":%d,\"x\":%ld,\"y\":%ld,\"w\":%ld,\"h\":%ld}\n", o.scale, ymin,
-                 box[0], box[1], box[2], box[3]);
+        snprintf(json, sizeof json, "{\"scale\":%d,\"ymin\":%d,\"ground\":%d,\"x\":%ld,\"y\":%ld,\"w\":%ld,\"h\":%ld}\n", o.scale,
+                 low, ground == INT_MAX ? 63 : ground, box[0], box[1], box[2], box[3]);
         snprintf(path, sizeof path, "%s/r.%d.%d.json", out, rx, rz);
         if (write_text(path, json)) { fprintf(stderr, "can't write %s\n", path); return 1; }
         printf("r.%d.%d: %ld x %ld px, %.2f s\n", rx, rz, box[2], box[3], now_s() - t0);

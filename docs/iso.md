@@ -47,5 +47,7 @@ which block a pixel is) and `r.<x>.<z>.json`, the pictures' corner in
 projected pixels and their size (`w` 0 and no pictures for an empty
 region). Drawn in order of `rx + rz`, each at its corner, they make the
 world without a seam: a region is drawn a quarter at a time, as iso draws
-an area, with the world around it and not cut at its edges. The app's
-area picker is made of them.
+an area, with the world around it and not cut at its edges. The ground
+is cut at y 0, or 8 under it where it lies lower (a world built below 0);
+`--ymin` sets the cut instead. The json gives that ground too, and the
+app's area picker, made of these pictures, starts its own cut under it.

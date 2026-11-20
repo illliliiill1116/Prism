@@ -47,6 +47,7 @@ export function openPicker({ backend, world, jar, T, estimate, onBake }) {
     const status = el("span", { className: "meta" });
     const what = el("div", { className: "pk-what" }, T.pickHint);
     const ymin = el("input", { type: "range", min: -64, max: 200, value: 40 });
+    let cutMoved = false;
     const yval = el("output");
     const go = el("button", { className: "go", disabled: true }, T.start);
     const close = el("button", {}, T.cancel);
@@ -257,6 +258,12 @@ export function openPicker({ backend, world, jar, T, estimate, onBake }) {
             const o = await backend.overview(world.id, jar, r.rx, r.rz);
             if (o.error) throw new Error(o.error);
             Object.assign(r, { x: o.x, y: o.y, w: o.w, h: o.h });
+            /* the cut starts at 40, or 8 under the lowest ground seen (a
+               world built lower), until it is moved */
+            if (!cutMoved && o.w && o.ground != null) {
+                const v = Math.max(-64, Math.min(40, o.ground - 8));
+                if (v < +ymin.value) { ymin.value = v; showArea(); }
+            }
             const img = new Image();
             if (o.w && o.png) {
                 img.src = o.png;
@@ -359,7 +366,7 @@ export function openPicker({ backend, world, jar, T, estimate, onBake }) {
         wheelT = setTimeout(loadNext, 150);
     }, { passive: false });
     let wheelT = 0;
-    ymin.oninput = () => { showArea(); draw(); };
+    ymin.oninput = () => { cutMoved = true; showArea(); draw(); };
 
     function end() {
         dead = true;
