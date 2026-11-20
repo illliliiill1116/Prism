@@ -1,0 +1,54 @@
+:root {
+    color-scheme: light dark;
+    --bg: #f6f3ee; --card: #fffdf9; --ink: #2b2620; --dim: #7a7066; --line: #e4ddd2;
+    --accent: #c0673a; --accent-ink: #fff; --bar: #ebe4d9; --bad: #b3402e;
+}
+@media (prefers-color-scheme: dark) {
+    :root { --bg: #1b1916; --card: #24211d; --ink: #ece6dd; --dim: #9a9086; --line: #36312b;
+            --accent: #e08a5a; --accent-ink: #1b1916; --bar: #36312b; --bad: #e0705e; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+       font: 15px/1.5 system-ui, -apple-system, "Segoe UI", "Microsoft JhengHei", "PingFang TC", sans-serif; }
+header, main, footer { max-width: 1040px; margin: 0 auto; padding: 0 20px; }
+header { padding-top: 36px; }
+h1 { margin: 0; font-size: 30px; letter-spacing: .02em; }
+h2 { font-size: 17px; margin: 32px 0 12px; }
+#tagline, .dim { color: var(--dim); margin: 4px 0 0; }
+footer { color: var(--dim); font-size: 13px; padding-top: 40px; padding-bottom: 40px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px;
+        display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.card.pick { cursor: pointer; }
+.card.pick:hover, .card.open { border-color: var(--accent); }
+.card .top { display: flex; gap: 12px; align-items: center; min-width: 0; }
+.card img, .card .noicon { width: 48px; height: 48px; border-radius: 6px; image-rendering: pixelated; flex: none;
+                           background: var(--bar); }
+.card .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card .meta { color: var(--dim); font-size: 13px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+button, a.btn, select { font: inherit; border-radius: 7px; border: 1px solid var(--line); background: var(--card);
+                        color: var(--ink); padding: 5px 12px; cursor: pointer; text-decoration: none; }
+button.go, a.btn.go { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+button.del { margin-left: auto; color: var(--bad); }
+button:disabled { opacity: .5; cursor: default; }
+.opts { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); padding-top: 10px; }
+.opts label { display: flex; gap: 6px; align-items: center; font-size: 14px; }
+#job { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-top: 24px; }
+#job .bar { height: 8px; border-radius: 4px; background: var(--bar); overflow: hidden; margin: 10px 0; }
+#job .bar > div { height: 100%; background: var(--accent); transition: width .4s; }
+.bad { color: var(--bad); }
+.empty { color: var(--dim); }
+.card.drop { grid-column: 1 / -1; border-style: dashed; }
+body.dragging .card.drop { border-color: var(--accent); background: var(--bar); }
+
+/* the area picker (picker.js) */
+body.picking { overflow: hidden; }
+.picker { position: fixed; inset: 0; z-index: 20; display: flex; flex-direction: column; background: #15171a; color: #ece6dd; }
+.picker canvas { flex: 1; min-height: 0; width: 100%; touch-action: none; cursor: crosshair; }
+.pk-top, .pk-bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding: 10px 16px; background: #1f2226; }
+.pk-top b { margin-right: auto; }
+.pk-what { flex: 1; min-width: 200px; font-size: 14px; }
+.pk-bar label { display: flex; gap: 8px; align-items: center; font-size: 14px; }
+.picker .meta { color: #9a9086; }
+.picker button:not(.go) { background: #2a2e33; color: inherit; border-color: #3a3f45; }
