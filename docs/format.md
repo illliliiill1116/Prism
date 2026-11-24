@@ -28,6 +28,16 @@ in `viewer/js/walk.js`.
 The viewer refuses a map in a format it does not read and asks for a
 rebake.
 
+A world taller than the usual -64..319 (a datapack's dimension height) is
+baked as tall as its blocks go. Vertex positions are int16 in 1/64 block,
+which reaches 511 either way, so a region whose blocks reach past y ±504
+has its vertices stored from a y origin of its own, `"oy"` in its
+`index.json` (missing means 0). Each region's `index.json` also lists its
+tiles' lowest and highest column tops (`"ty"`, in the order of `"tiles"`)
+and the region's (`"y"`, copied into its `map.json` entry), which the
+viewer's distances to them go by. Maps without them are taken to be of the
+usual height.
+
 `map.json` also gives the world's water surface (`"sea"`, the height of
 the top water block that most of its water columns have). The ground mist
 lies on it and the view starts just above it, so a map whose sea is not at

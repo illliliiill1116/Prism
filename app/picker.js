@@ -21,18 +21,22 @@ function unproject(s, sx, sy, y) {
     return [(a + b) / 2, (b - a) / 2];
 }
 
-/* prism overview's heights picture as one number a pixel: (y + 64) * 128
-   + 1 in red (high) and green, 0 where nothing is. Read as stored: no
-   colour management, no premultiplying. */
-async function heights(url, w, h) {
+/* prism overview's heights picture as one number a pixel: (y - hy) * hk
+   + 1 in red (high) and green, 0 where nothing is; hy, hk -64 and 128
+   unless its json says (a world taller than the usual). Read as stored:
+   no colour management, no premultiplying. Returned as world y, NaN where
+   nothing is. */
+async function heights(url, w, h, hy, hk) {
     const bmp = await createImageBitmap(await (await fetch(url)).blob(), { colorSpaceConversion: "none", premultiplyAlpha: "none" });
     const c = document.createElement("canvas");
     c.width = w; c.height = h;
     const g = c.getContext("2d", { willReadFrequently: true });
     g.drawImage(bmp, 0, 0);
     bmp.close();
-    const d = g.getImageData(0, 0, w, h).data, out = new Uint16Array(w * h);
-    for (let i = 0; i < out.length; i++) if (d[i * 4 + 3] === 255) out[i] = (d[i * 4] << 8) | d[i * 4 + 1];
+    const d = g.getImageData(0, 0, w, h).data, out = new Float32Array(w * h).fill(NaN);
+    let top = -Infinity;
+    for (let i = 0; i < out.length; i++) if (d[i * 4 + 3] === 255) top = Math.max(top, out[i] = (((d[i * 4] << 8) | d[i * 4 + 1]) - 1) / hk + hy);
+    out.top = top;
     return out;
 }
 
@@ -75,7 +79,7 @@ export function openPicker({ backend, world, jar, T, estimate, onBake }) {
             const ix = Math.floor(px - r.x), iy = Math.floor(py - r.y);
             if (ix < 0 || iy < 0 || ix >= r.w || iy >= r.h) continue;
             const v = r.hts[iy * r.w + ix];
-            if (v) return (v - 1) / 128 - 64;
+            if (!Number.isNaN(v)) return v;
         }
         return null;
     }
@@ -157,9 +161,11 @@ export function openPicker({ backend, world, jar, T, estimate, onBake }) {
         if (key === hlKey) return;
         hlKey = key;
         let sum = 0, n = 0;
-        /* the area's box on the picture plane, ymin to the top */
+        /* the area's box on the picture plane, ymin to the top: the usual
+           world's, or the highest any picture shows */
+        const top = Math.max(320, ...regions.map((r) => (r.hts ? r.hts.top + 1 : -Infinity)));
         const pts = [];
-        for (const [x, z] of [[x0, z0], [x1 + 1, z0], [x0, z1 + 1], [x1 + 1, z1 + 1]]) pts.push(project(S, x, y0, z), project(S, x, 320, z));
+        for (const [x, z] of [[x0, z0], [x1 + 1, z0], [x0, z1 + 1], [x1 + 1, z1 + 1]]) pts.push(project(S, x, y0, z), project(S, x, top, z));
         const lo = [Math.min(...pts.map((p) => p[0])), Math.min(...pts.map((p) => p[1]))];
         const hi = [Math.max(...pts.map((p) => p[0])), Math.max(...pts.map((p) => p[1]))];
         for (const r of regions) {
@@ -174,8 +180,8 @@ export function openPicker({ backend, world, jar, T, estimate, onBake }) {
                 const py = r.y + by + iy + 0.5, row = (by + iy) * r.w + bx;
                 for (let ix = 0; ix < bw; ix++) {
                     const v = r.hts[row + ix];
-                    if (!v) continue;
-                    const y = (v - 1) / 128 - 64 - EPS;
+                    if (Number.isNaN(v)) continue;
+                    const y = v - EPS;
                     if (y < y0) continue;
                     const [x, z] = unproject(S, r.x + bx + ix + 0.5, py, y);
                     if (x < x0 || x >= x1 + 1 || z < z0 || z >= z1 + 1) continue;
@@ -272,7 +278,9 @@ export function openPicker({ backend, world, jar, T, estimate, onBake }) {
             }
             if (o.w && o.hpng) {
                 if (o.hpng.startsWith("blob:")) urls.push(o.hpng);
-                r.hts = await heights(o.hpng, o.w, o.h).catch(() => null);
+                r.hts = await heights(o.hpng, o.w, o.h, o.hy ?? -64, o.hk ?? 128).catch(() => null);
+                /* the cut reaches up to the highest ground seen (a taller world's) */
+                if (r.hts && r.hts.top > +ymin.max) ymin.max = Math.floor(r.hts.top);
             }
             r.img = img;
         } catch (e) {

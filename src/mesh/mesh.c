@@ -110,7 +110,7 @@ void emit_quad(mbuf_t *m, float q[4][3], const canvas_t *tex, const float uv16[4
         float c[3];
         for (int a = 0; a < 3; a++) c[a] = (q[0][a] + q[2][a]) * 0.5f - n[a] * 0.01f;
         int bx = (int)floorf(c[0]), by = (int)floorf(c[1]), bz = (int)floorf(c[2]);
-        thin = bx >= 0 && bz >= 0 && bx < GW && bz < GW && by >= 0 && by < GH && !occ_at(bx, by, bz) && gget(bx, by, bz);
+        thin = bx >= 0 && bz >= 0 && bx < GW && bz < GW && by >= 0 && by < grid_h && !occ_at(bx, by, bz) && gget(bx, by, bz);
     }
     /* An upright plant on solid ground: its foot is shaded (PLANT_BASE).
      * One hanging from a block (cave vines, weeping vines: its column of
@@ -121,19 +121,19 @@ void emit_quad(mbuf_t *m, float q[4][3], const canvas_t *tex, const float uv16[4
         /* the block behind the quad's centre (a far plant's face lies on its edge) */
         int bx = (int)floorf((q[0][0] + q[2][0]) * 0.5f - n[0] * 0.01f), by = (int)floorf((q[0][1] + q[2][1]) * 0.5f - n[1] * 0.01f),
             bz = (int)floorf((q[0][2] + q[2][2]) * 0.5f - n[2] * 0.01f);
-        canopy = bx >= 0 && bz >= 0 && bx < GW && bz < GW && by >= 0 && by < GH && plant_far(bx, by, bz) != PLANT_FADES;
+        canopy = bx >= 0 && bz >= 0 && bx < GW && bz < GW && by >= 0 && by < grid_h && plant_far(bx, by, bz) != PLANT_FADES;
     }
     if (up_lit && fabsf(n[1]) < 0.5f && lod_mode != 2) {
         float c[3];
         for (int a = 0; a < 3; a++) c[a] = (q[0][a] + q[2][a]) * 0.5f;
         int bx = (int)floorf(c[0]), by = (int)floorf(c[1]), bz = (int)floorf(c[2]);
-        if (bx >= 0 && bz >= 0 && bx < GW && bz < GW && by >= 0 && by < GH) {
+        if (bx >= 0 && bz >= 0 && bx < GW && bz < GW && by >= 0 && by < grid_h) {
             footed = by >= 1 && occ_at(bx, by - 1, bz);
             foot_y = by;
             int lo = by, hi = by;
             while (lo > 0 && by - lo < 64 && states[gget(bx, lo - 1, bz)].up_lit) lo--;
-            while (hi + 1 < GH && hi - by < 64 && states[gget(bx, hi + 1, bz)].up_lit) hi++;
-            hangs = !(lo >= 1 && occ_at(bx, lo - 1, bz)) && hi + 1 < GH && occ_at(bx, hi + 1, bz);
+            while (hi + 1 < grid_h && hi - by < 64 && states[gget(bx, hi + 1, bz)].up_lit) hi++;
+            hangs = !(lo >= 1 && occ_at(bx, lo - 1, bz)) && hi + 1 < grid_h && occ_at(bx, hi + 1, bz);
         }
     }
     const float cu[4] = { uv16[0], uv16[2], uv16[2], uv16[0] };
@@ -151,7 +151,7 @@ void emit_quad(mbuf_t *m, float q[4][3], const canvas_t *tex, const float uv16[4
         v += (v < vc ? eps : v > vc ? -eps : 0);
         float *P = &m->pos[m->nv * 3];
         P[0] = q[i][0] - MARGIN - REG / 2;
-        P[1] = q[i][1] + YMIN;
+        P[1] = q[i][1] + grid_y0 - vert_y0;
         P[2] = q[i][2] - MARGIN - REG / 2;
         float *U = &m->uv[m->nv * 2];
         U[0] = (s->x + s->w / 2 + u / 16.0f * s->w) / atlas_w;
@@ -161,7 +161,7 @@ void emit_quad(mbuf_t *m, float q[4][3], const canvas_t *tex, const float uv16[4
         if (lod_mode == 2)
             for (int k = 0; k < 6; k++) {
                 int x = (int)floorf(bp[0] + n[0] * 0.5f), y = (int)floorf(bp[1] + n[1] * 0.5f), z = (int)floorf(bp[2] + n[2] * 0.5f);
-                if (x < 0 || z < 0 || x >= GW || z >= GW || y < 0 || y >= GH || !occ_at(x, y, z)) break;
+                if (x < 0 || z < 0 || x >= GW || z >= GW || y < 0 || y >= grid_h || !occ_at(x, y, z)) break;
                 for (int a = 0; a < 3; a++) bp[a] += n[a];
             }
         if (pt->kind == PAINT_FIXED) memcpy(T, pt->fixed, sizeof T);
@@ -373,14 +373,14 @@ static int far_face_open(int x, int y, int z, int f) {
 /* the height a sunk plant at x, y, z is cut off at (sunk_cap) */
 float sunk_cap(int x, int y, int z) {
     int sy = y;
-    while (sy + 1 < GH && states[gget(x, sy + 1, z)].fluid == FLUID_WATER) sy++;
+    while (sy + 1 < grid_h && states[gget(x, sy + 1, z)].fluid == FLUID_WATER) sy++;
     return sy + 14 / 16.0f - SUNK_TOP_DEPTH;
 }
 
 static void mesh_far_plant(worker_t *w, int gx, int gy, int gz, const state_t *st) {
     int far = plant_far(gx, gy, gz);
     if (far == PLANT_FADES) return;
-    float cap = far == PLANT_SUNK ? sunk_cap(gx, gy, gz) : (float)GH;
+    float cap = far == PLANT_SUNK ? sunk_cap(gx, gy, gz) : (float)grid_h;
     if (cap <= gy) return;
     uint16_t id = gget(gx, gy, gz);
     const float full_uv[4] = { 0, 0, 16, 16 };
@@ -393,7 +393,7 @@ static void mesh_far_plant(worker_t *w, int gx, int gy, int gz, const state_t *s
         int h = 1;
         if (f != FACE_UP && f != FACE_DOWN) {
             if (gy > 0 && gget(gx, gy - 1, gz) == id && far_face_open(gx, gy - 1, gz, f)) continue;
-            while (gy + h < GH && h < 64 && gy + h < cap && gget(gx, gy + h, gz) == id && far_face_open(gx, gy + h, gz, f)) h++;
+            while (gy + h < grid_h && h < 64 && gy + h < cap && gget(gx, gy + h, gz) == id && far_face_open(gx, gy + h, gz, f)) h++;
         }
         float top = gy + h < cap ? (float)(gy + h) : cap;
         const float box[6] = { (float)gx, (float)gy, (float)gz, (float)gx + 1, top, (float)gz + 1 };
@@ -495,7 +495,7 @@ static void *mesh_worker(void *arg) {
         if (mesh_skip[c]) ;
         else if (lod_mode == 2) mesh_coarse(w, cx, cz);
         else
-            for (int gy = mesh_y0; gy < GH; gy++)
+            for (int gy = mesh_y0; gy < grid_h; gy++)
                 for (int z = 0; z < 16; z++)
                     for (int x = 0; x < 16; x++)
                         mesh_block(w, MARGIN + cx * 16 + x, gy, MARGIN + cz * 16 + z);

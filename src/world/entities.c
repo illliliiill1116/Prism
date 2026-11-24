@@ -28,6 +28,16 @@ const canvas_t *be_texture(int gx, int gy, int gz) {
     return b->gi ? &betex[b->tex].tex : NULL;
 }
 
+/* The grid grew down by d voxels' worth of index: every position moves */
+void bepos_shift(uint32_t d) {
+    bepos_t *old = bepos;
+    bepos = calloc(bepos_cap, sizeof *bepos);
+    if (!bepos) { fprintf(stderr, "oom\n"); exit(1); }
+    for (uint32_t i = 0; i < bepos_cap; i++)
+        if (old[i].gi) bepos[bepos_slot(old[i].gi - 1 + d)] = (bepos_t){ old[i].gi + d, old[i].tex };
+    free(old);
+}
+
 static void be_put(int gx, int gy, int gz, const char *key, canvas_t (*make)(const void *), const void *arg) {
     uint32_t t = 0;
     while (t < nbetex && strcmp(betex[t].key, key)) t++;
@@ -184,8 +194,8 @@ void load_block_entities(const nbt_pool_t *pool, const nbt_tag_t *root) {
         const nbt_tag_t *id = nbt_compound_getz(pool, be, "id");
         const nbt_tag_t *X = nbt_compound_getz(pool, be, "x"), *Y = nbt_compound_getz(pool, be, "y"), *Z = nbt_compound_getz(pool, be, "z");
         if (!id || !X || !Y || !Z || X->type != NBT_INT || Y->type != NBT_INT || Z->type != NBT_INT) continue;
-        int gx = X->v_int - reg_x0, gy = Y->v_int - YMIN, gz = Z->v_int - reg_z0;
-        if (gx < 0 || gz < 0 || gy < 0 || gx >= GW || gz >= GW || gy >= GH) continue;
+        int gx = X->v_int - reg_x0, gy = Y->v_int - grid_y0, gz = Z->v_int - reg_z0;
+        if (gx < 0 || gz < 0 || gy < 0 || gx >= GW || gz >= GW || gy >= grid_h) continue;
         const state_t *st = &states[grid[gidx(gx, gy, gz)]];
         if (nbt_streq(id, "minecraft:piston")) {
             /* A block on the move (moving_piston): on loading, the game

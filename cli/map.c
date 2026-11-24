@@ -62,7 +62,7 @@ static char *read_file(const char *path, size_t *len) {
 /* What a region's index.json says: its format, when it was baked, its
  * tile count and the sums of the tiles' tx, tz, and its water surface and
  * the columns that have it. 0 if there is none. */
-typedef struct { int format; long long baked; long tiles, tx, tz; int sea; long sea_cols; } bake_info_t;
+typedef struct { int format; long long baked; long tiles, tx, tz; int sea; long sea_cols; int has_y, y[2]; } bake_info_t;
 
 static int bake_info(const char *dir, bake_info_t *bi) {
     char path[4096];
@@ -80,6 +80,11 @@ static int bake_info(const char *dir, bake_info_t *bi) {
     if (ok && (v = json_object_getz(&pool, root, "sea")) && v->type == JSON_ARRAY && json_array_count(v) == 2) {
         bi->sea = (int)json_array_at(&pool, v, 0)->number;
         bi->sea_cols = (long)json_array_at(&pool, v, 1)->number;
+    }
+    if (ok && (v = json_object_getz(&pool, root, "y")) && v->type == JSON_ARRAY && json_array_count(v) == 2) {
+        bi->has_y = 1;
+        bi->y[0] = (int)json_array_at(&pool, v, 0)->number;
+        bi->y[1] = (int)json_array_at(&pool, v, 1)->number;
     }
     if (ok && (v = json_object_getz(&pool, root, "tiles")) && v->type == JSON_ARRAY) {
         for (uint32_t i = 0; i < json_array_count(v); i++) {
@@ -207,7 +212,7 @@ int cmd_map(int argc, char **argv) {
         else if (strcmp(argv[i], "--near") == 0 && i + 1 < argc && sscanf(argv[++i], "%d,%d,%d", &nx, &nz, &nr) == 3 && nr >= 0)
             near = 1;
         else if (strcmp(argv[i], "--clip") == 0 && i + 1 < argc) {
-            if (parse_clip(clip_arg = argv[++i])) { fprintf(stderr, "--clip x0,z0,x1,z1,ymin (ymin -64..319)\n"); return 2; }
+            if (parse_clip(clip_arg = argv[++i])) { fprintf(stderr, "--clip x0,z0,x1,z1,ymin (ymin -2032..4063)\n"); return 2; }
         }
         else if (strcmp(argv[i], "--plan") == 0) plan = 1;
         else if (strcmp(argv[i], "--index") == 0) index_only = 1;
@@ -294,8 +299,10 @@ int cmd_map(int argc, char **argv) {
         }
         bake_info_t bi;
         bake_info(dir, &bi);
-        sappend(&list, "%s{\"rx\":%d,\"rz\":%d,\"dir\":\"r.%d.%d\",\"tiles\":%ld,\"tx\":%ld,\"tz\":%ld}", i ? "," : "",
+        sappend(&list, "%s{\"rx\":%d,\"rz\":%d,\"dir\":\"r.%d.%d\",\"tiles\":%ld,\"tx\":%ld,\"tz\":%ld", i ? "," : "",
                 regs[i].rx, regs[i].rz, regs[i].rx, regs[i].rz, bi.tiles, bi.tx, bi.tz);
+        if (bi.has_y) sappend(&list, ",\"y\":[%d,%d]", bi.y[0], bi.y[1]);
+        sappend(&list, "}");
         if (bi.sea_cols > 0 && sea_y && sea_n) {
             int k = 0;
             while (k < nsea && sea_y[k] != bi.sea) k++;

@@ -73,7 +73,7 @@ int cmd_bake(int argc, char **argv) {
     for (int i = 7; i < argc; i++) {
         if (strcmp(argv[i], "glb") == 0) want_glb = 1;
         else if (strcmp(argv[i], "--clip") == 0 && i + 1 < argc) {
-            if (parse_clip(argv[++i])) { fprintf(stderr, "--clip x0,z0,x1,z1,ymin (ymin -64..319)\n"); return 2; }
+            if (parse_clip(argv[++i])) { fprintf(stderr, "--clip x0,z0,x1,z1,ymin (ymin -2032..4063)\n"); return 2; }
         } else { fprintf(stderr, "unknown option %s\n", argv[i]); return 2; }
     }
     if (nthreads < 1) { fprintf(stderr, "threads: 1 or more\n"); return 2; }
@@ -86,21 +86,41 @@ int cmd_bake(int argc, char **argv) {
  * block of its columns whose top is water, and how many columns have it;
  * 0 columns when none is. The viewer's ground mist lies on it. */
 static int sea_level(long *cols) {
-    static long hist[GH];
-    memset(hist, 0, sizeof hist);
+    long *hist = calloc((size_t)grid_h, sizeof *hist);
+    if (!hist) { fprintf(stderr, "oom\n"); exit(1); }
     for (int z = MARGIN; z < MARGIN + REG; z++)
         for (int x = MARGIN; x < MARGIN + REG; x++)
-            for (int y = GH - 1; y >= 0; y--) {
+            for (int y = grid_h - 1; y >= 0; y--) {
                 const state_t *s = &states[grid[gidx(x, y, z)]];
                 if (s->air) continue;
                 if (s->fluid == FLUID_WATER) hist[y]++;
                 break;
             }
     int best = 0;
-    for (int y = 1; y < GH; y++)
+    for (int y = 1; y < grid_h; y++)
         if (hist[y] > hist[best]) best = y;
     *cols = hist[best];
-    return best + YMIN;
+    free(hist);
+    return best + grid_y0;
+}
+
+/* Each tile's lowest and highest column top (coltop: its highest
+ * occluder), world y; the grid's bottom and top when it has none */
+static void tile_tops(int ty[NTILES][2]) {
+    const int TB = TILE_CHUNKS * 16, TW = 32 / TILE_CHUNKS;
+    for (int t = 0; t < NTILES; t++) {
+        int lo = INT_MAX, hi = INT_MIN, x0 = MARGIN + t % TW * TB, z0 = MARGIN + t / TW * TB;
+        for (int z = z0; z < z0 + TB; z++)
+            for (int x = x0; x < x0 + TB; x++) {
+                int c = coltop[z * GW + x];
+                if (c < 0) continue;
+                if (c < lo) lo = c;
+                if (c > hi) hi = c;
+            }
+        if (lo > hi) { lo = 0; hi = grid_h - 1; }
+        ty[t][0] = lo + grid_y0;
+        ty[t][1] = hi + 1 + grid_y0;
+    }
 }
 
 /* The window from chunk c0x, c0z (a region and MARGIN around it) baked
@@ -202,7 +222,12 @@ int bake_region(const char *rdir, int c0x, int c0z, const char *out, int nthread
      * which chunks changed since. "sea" is its water surface and the
      * columns that have it (sea_level), for map.json's. "ver" names this
      * bake, for the viewer to put on tile URLs: a browser's cached tile
-     * then never outlives the bake it came from. */
+     * then never outlives the bake it came from. "oy" (when not 0) is
+     * the world y the vertices are from (vert_y0); "ty" each listed tile's
+     * lowest and highest column top and "y" the region's, world y, for
+     * the viewer's distances to them. */
+    int ty[NTILES][2], ylo = INT_MAX, yhi = INT_MIN;
+    tile_tops(ty);
     str_t idx = { 0 };
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
@@ -219,7 +244,19 @@ int bake_region(const char *rdir, int c0x, int c0z, const char *out, int nthread
                 (unsigned long long)tile_at[t][2], (unsigned long long)tile_at[t][3]);
         first = 0;
     }
-    sappend(&idx, "]}\n");
+    sappend(&idx, "],\"ty\":[");
+    first = 1;
+    for (int t = 0; t < NTILES; t++) {
+        if (!tile_quads[0][t] && !tile_quads[1][t] && !tile_quads[2][t]) continue;
+        sappend(&idx, "%s[%d,%d]", first ? "" : ",", ty[t][0], ty[t][1]);
+        if (ty[t][0] < ylo) ylo = ty[t][0];
+        if (ty[t][1] > yhi) yhi = ty[t][1];
+        first = 0;
+    }
+    if (ylo > yhi) ylo = yhi = 0;
+    sappend(&idx, "],\"y\":[%d,%d]", ylo, yhi);
+    if (vert_y0) sappend(&idx, ",\"oy\":%d", vert_y0);
+    sappend(&idx, "}\n");
     snprintf(path, sizeof path, "%s/index.json", out);
     if (write_atomic(path, idx.p, idx.n)) { fprintf(stderr, "can't write %s\n", path); return 1; }
     free(idx.p);

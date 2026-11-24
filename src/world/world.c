@@ -117,7 +117,7 @@ uint8_t *blkl;
 
 emitter_t *emv;
 
-uint32_t emc[EMIT_CW * EMIT_CW * EMIT_CH + 1];
+uint32_t *emc;
 
 int parse_chunk(const mca_region_t *r, int lx, int lz, nbt_pool_t *pool, nbt_tag_t **root) {
     mca_chunk_loc_t loc;
@@ -127,19 +127,45 @@ int parse_chunk(const mca_region_t *r, int lx, int lz, nbt_pool_t *pool, nbt_tag
     return mca_region_parse_chunk(r, lx, lz, pool, root);
 }
 
+/* Whether palette entry p is one of the airs (without interning it) */
+static int palette_air(const nbt_pool_t *pool, const nbt_tag_t *pal, uint32_t p) {
+    const nbt_tag_t *name = nbt_compound_getz(pool, nbt_child_at(pool, pal, p), "Name");
+    if (!name || name->type != NBT_STRING) return 1;
+    static const char *const AIRS[] = { "minecraft:air", "minecraft:cave_air", "minecraft:void_air" };
+    for (int k = 0; k < 3; k++)
+        if ((size_t)name->string.len == strlen(AIRS[k]) && memcmp(name->string.data, AIRS[k], name->string.len) == 0) return 1;
+    return 0;
+}
+
 void load_chunk(nbt_pool_t *pool, nbt_tag_t *root, int gx0, int gz0) {
     nbt_tag_t *sections = nbt_compound_getz(pool, root, "sections");
     for (uint32_t s = 0; sections && s < sections->child_count; s++) {
         nbt_tag_t *sec = nbt_child_at(pool, sections, s);
         nbt_tag_t *yt = nbt_compound_getz(pool, sec, "Y");
         if (!yt) continue;
-        int sy = yt->v_byte * 16 - YMIN;
-        if (sy < 0 || sy >= GH) continue;
+        int wy = yt->v_byte * 16, sy = wy - grid_y0;
         uint16_t idx[CHUNK_BLOCKS_PER_SECTION];
         const nbt_tag_t *pal;
         if (chunk_decode_block_states(pool, sec, idx, &pal) != CHUNK_OK) continue;
-        uint32_t map[4096];
         uint32_t npal = pal->child_count < 4096 ? pal->child_count : 4096;
+        /* past the grid (a dimension taller than the usual): grown to it,
+         * unless the section is empty */
+        if (sy < 0 || sy >= grid_h) {
+            uint8_t air[4096];
+            int solid = 0;
+            for (uint32_t p = 0; p < npal; p++) solid |= !(air[p] = palette_air(pool, pal, p));
+            if (!solid) continue;
+            if (grid_cover(wy, wy + 16)) {
+                long n = 0;
+                for (int i = 0; i < 4096; i++) n += idx[i] < npal && !air[idx[i]];
+                if (n && wy < grid_dropped_lo) grid_dropped_lo = wy;
+                if (n && wy + 15 > grid_dropped_hi) grid_dropped_hi = wy + 15;
+                grid_dropped += n;
+                continue;
+            }
+            sy = wy - grid_y0;
+        }
+        uint32_t map[4096];
         for (uint32_t p = 0; p < npal; p++) map[p] = intern_state(pool, pal, p);
         for (int i = 0; i < 4096; i++) {
             int x = i & 15, z = (i >> 4) & 15, y = i >> 8;
@@ -194,7 +220,7 @@ static inline int sky_block(int x, int y, int z) {
  * in, and open voxels in direct sky light next to an open voxel that is
  * not (under an overhang, at a cave mouth). BFS from there. */
 long propagate_sky(void) {
-    size_t nvox = (size_t)GW * GW * GH;
+    size_t nvox = (size_t)GW * GW * grid_h;
     memset(skyl, 0, nvox / 2);
     if (!coltop) coltop = xmalloc((size_t)GW * GW * sizeof *coltop);
     for (int z = 0; z < GW; z++)
@@ -218,7 +244,7 @@ long propagate_sky(void) {
                 if (nx < 0 || nz < 0 || nx >= GW || nz >= GW) continue;
                 if (coltop[nz * GW + nx] > hi) hi = coltop[nz * GW + nx];
             }
-            for (int y = top + 1; y <= hi && y < GH; y++) PUSH(gidx(x, y, z));
+            for (int y = top + 1; y <= hi && y < grid_h; y++) PUSH(gidx(x, y, z));
             for (int y = top; y >= 0 && !sky_block(x, y, z); y--) {
                 sky_set(gidx(x, y, z), 15);
                 PUSH(gidx(x, y, z));
@@ -232,7 +258,7 @@ long propagate_sky(void) {
         if (lv <= 1) continue;
         for (int d = 0; d < 6; d++) {
             int nx = x + D[d][0], ny = y + D[d][1], nz = z + D[d][2];
-            if (nx < 0 || nz < 0 || nx >= GW || nz >= GW || ny < 0 || ny >= GH) continue;
+            if (nx < 0 || nz < 0 || nx >= GW || nz >= GW || ny < 0 || ny >= grid_h) continue;
             if (ny > coltop[nz * GW + nx] || sky_block(nx, ny, nz)) continue;
             size_t j = gidx(nx, ny, nz);
             if (((skyl[j >> 1] >> ((j & 1) * 4)) & 15) >= lv - 1) continue;
@@ -248,22 +274,27 @@ long propagate_sky(void) {
 
 /* Brightest first, so each voxel is written once, with its final level. */
 long propagate_block(void) {
-    size_t nvox = (size_t)GW * GW * GH;
+    size_t nvox = (size_t)GW * GW * grid_h;
     struct { uint32_t *v; size_t n, c; } bk[16] = { 0 };
 #define BPUSH(l, i) do { if (bk[l].n == bk[l].c) { bk[l].c = bk[l].c ? bk[l].c * 2 : 4096; \
         bk[l].v = realloc(bk[l].v, bk[l].c * sizeof *bk[l].v); if (!bk[l].v) { fprintf(stderr, "oom\n"); exit(1); } } \
         bk[l].v[bk[l].n++] = (uint32_t)(i); } while (0)
     long seeds = 0;
-    /* a window loaded before this one left its own */
+    /* a window loaded before this one left its own, of its grid's height */
+    static size_t blkl_n;
+    if (blkl && blkl_n != nvox) { free(blkl); blkl = NULL; }
     if (blkl) memset(blkl, 0, nvox);
     free(emv);
     emv = NULL;
-    memset(emc, 0, sizeof emc);
+    const size_t ncell = (size_t)EMIT_CW * EMIT_CW * EMIT_CH;
+    free(emc);
+    emc = calloc(ncell + 1, sizeof *emc);
+    if (!emc) { fprintf(stderr, "oom\n"); exit(1); }
     for (size_t i = 0; i < nvox; i++) {
         if (!(i & 63) && grid_air64(i)) { i += 63; continue; }
         int e = states[grid[i]].emit;
         if (!e) continue;
-        if (!blkl) blkl = calloc(nvox, 1);
+        if (!blkl) { blkl = calloc(nvox, 1); blkl_n = nvox; }
         if (!blkl) { fprintf(stderr, "oom\n"); exit(1); }
         blkl[i] = (uint8_t)e;
         BPUSH(e, i);
@@ -277,7 +308,7 @@ long propagate_block(void) {
             int x = (int)(i % GW), z = (int)((i / GW) % GW), y = (int)(i / ((size_t)GW * GW));
             for (int d = 0; d < 6; d++) {
                 int nx = x + D[d][0], ny = y + D[d][1], nz = z + D[d][2];
-                if (nx < 0 || nz < 0 || nx >= GW || nz >= GW || ny < 0 || ny >= GH) continue;
+                if (nx < 0 || nz < 0 || nx >= GW || nz >= GW || ny < 0 || ny >= grid_h) continue;
                 size_t j = gidx(nx, ny, nz);
                 if (blkl[j] >= lv - 1 || states[grid[j]].cull) continue;
                 blkl[j] = (uint8_t)(lv - 1);
@@ -289,12 +320,11 @@ long propagate_block(void) {
     if (seeds) {
         emv = malloc((size_t)seeds * sizeof *emv);
         if (!emv) { fprintf(stderr, "oom\n"); exit(1); }
-        memset(emc, 0, sizeof emc);
+        uint32_t *at = xmalloc(ncell * sizeof *at);
         for (int pass = 0; pass < 2; pass++) {
-            uint32_t at[EMIT_CW * EMIT_CW * EMIT_CH];
             if (pass) {
-                for (size_t c = 0, sum = 0; c <= EMIT_CW * EMIT_CW * EMIT_CH; c++) { size_t n = emc[c]; emc[c] = (uint32_t)sum; sum += n; }
-                memcpy(at, emc, sizeof at);
+                for (size_t c = 0, sum = 0; c <= ncell; c++) { size_t n = emc[c]; emc[c] = (uint32_t)sum; sum += n; }
+                memcpy(at, emc, ncell * sizeof *at);
             }
             for (size_t i = 0; i < nvox; i++) {
                 if (!(i & 63) && grid_air64(i)) { i += 63; continue; }
@@ -306,6 +336,7 @@ long propagate_block(void) {
                 else emv[at[c]++] = (emitter_t){ (uint16_t)x, (uint16_t)y, (uint16_t)z, (uint8_t)e };
             }
         }
+        free(at);
     }
     return seeds;
 }

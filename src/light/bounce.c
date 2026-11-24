@@ -136,7 +136,7 @@ void bounce(const float p[3], const float n[3], float B[BOUNCE_ANGLES][3]) {
             float tin = tmax[ax];
             ip[ax] += step[ax];
             tmax[ax] += tdel[ax];
-            if (ip[0] < 0 || ip[2] < 0 || ip[0] >= GW || ip[2] >= GW || ip[1] < 0 || ip[1] >= GH) break;
+            if (ip[0] < 0 || ip[2] < 0 || ip[0] >= GW || ip[2] >= GW || ip[1] < 0 || ip[1] >= grid_h) break;
             if (ip[1] > top && step[1] >= 0) break;
             if (!occ_at(ip[0], ip[1], ip[2]) || occ_miss(ip[0], ip[1], ip[2], o, d, tin, fminf(fminf(tmax[0], tmax[1]), tmax[2]))) continue;
             float col[3];

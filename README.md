@@ -331,6 +331,9 @@ downloads more of what is near.
   read, and leaves them empty.
 - Baking needs up to about 2 GB of memory, since a region at a time is held
   in full (its blocks and light). `prism map` warns when less is free.
+  A world taller than the usual -64..319 (a datapack's height) takes more,
+  in proportion to how high its blocks go. A region is drawn at most 1008
+  blocks high; past that, the bake warns and leaves the rest out.
 - `prism map` does not notice a neighbour's edge chunk being deleted
   (only saved), so after trimming a world, bake it into a new folder.
 

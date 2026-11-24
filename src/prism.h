@@ -35,14 +35,31 @@ static inline float dcosf(float x) { return (float)cos(x); }
 static inline float dexpf(float x) { return (float)exp(x); }
 static inline float dpowf(float x, float y) { return (float)pow(x, y); }
 #include <time.h>
+#include <limits.h>
 
 /* ---- shared ---- */
 
 #define MARGIN 32
 #define REG 512
 #define GW (REG + 2 * MARGIN)
-#define YMIN (-64)
-#define GH 384
+/* The grid's height: the overworld's usual -64..319 (GRID_Y0, GRID_H) at
+ * least, grown by window_load to the sections that hold blocks, for a
+ * world whose dimension is taller (a datapack's, up to the game's
+ * -2032..4063). A world y is grid y + grid_y0. At most GRID_H_MAX high:
+ * vertices are int16 in 1/POS_Q block from vert_y0, so a region's span
+ * has to fit in about 1024. */
+#define GRID_Y0 (-64)
+#define GRID_H 384
+#define GRID_H_MAX 1008
+#define WORLD_Y_MIN (-2032)
+#define WORLD_Y_MAX 4063
+extern int grid_y0, grid_h;
+/* the world y vertices are stored from (index.json's "oy"): 0 unless
+ * the grid reaches past what int16 holds from there */
+extern int vert_y0;
+/* blocks window_load had to leave out, over GRID_H_MAX, and where */
+extern long grid_dropped;
+extern int grid_dropped_lo, grid_dropped_hi;
 void *xmalloc(size_t n);
 #define BOUNCE_ANGLES 4
 
@@ -129,7 +146,7 @@ extern uint16_t *grid; /* state index, 0 = air (state 0 is interned as air) */
  * linear RGB: grass, foliage, dry foliage, water. */
 #define BW (GW / 4)
 
-#define BH (GH / 4)
+#define BH (grid_h / 4)
 enum { BC_GRASS, BC_FOLIAGE, BC_DRY, BC_WATER, BC_COUNT };
 extern int nbiomes;
 extern uint8_t *bgrid;
@@ -143,7 +160,7 @@ extern uint64_t *focc; /* 1 bit per voxel: a thin blocker (far_occl) */
 static inline size_t gidx(int x, int y, int z) { return ((size_t)y * GW + (size_t)z) * GW + (size_t)x; }
 
 static inline uint16_t gget(int x, int y, int z) {
-    if (x < 0 || z < 0 || x >= GW || z >= GW || y < 0 || y >= GH) return 0;
+    if (x < 0 || z < 0 || x >= GW || z >= GW || y < 0 || y >= grid_h) return 0;
     return grid[gidx(x, y, z)];
 }
 
@@ -191,7 +208,7 @@ extern int cave_y;
 extern int16_t *coltop;
 
 static inline int sky_at(int x, int y, int z) {
-    if (y >= GH || x < 0 || z < 0 || x >= GW || z >= GW) return 15;
+    if (y >= grid_h || x < 0 || z < 0 || x >= GW || z >= GW) return 15;
     if (y < 0) return 0;
     if (y > coltop[z * GW + x]) return 15;
     size_t i = gidx(x, y, z);
@@ -205,16 +222,16 @@ extern uint8_t *blkl;
 #define EMIT_CELL 16
 
 #define EMIT_CW (GW / EMIT_CELL)
-#define EMIT_CH (GH / EMIT_CELL)
+#define EMIT_CH (grid_h / EMIT_CELL)
 typedef struct { uint16_t x, y, z; uint8_t e; } emitter_t;
 extern emitter_t *emv;
-extern uint32_t emc[EMIT_CW * EMIT_CW * EMIT_CH + 1];
+extern uint32_t *emc; /* EMIT_CW * EMIT_CW * EMIT_CH + 1 */
 
 /* A voxel below cave_y that no sky light reaches; not under mesh_y0,
  * which is cut away (window_clear_outside, --clip), so open. */
 extern int mesh_y0;
 static inline int is_cave(int x, int y, int z) {
-    return y + YMIN < cave_y && y >= mesh_y0 && sky_at(x, y, z) == 0;
+    return y + grid_y0 < cave_y && y >= mesh_y0 && sky_at(x, y, z) == 0;
 }
 
 /* A chunk's NBT (MCA_OK; MCA_ERR_EMPTY if it is not there, another
@@ -238,6 +255,10 @@ extern betex_t *betex;
 extern uint32_t nbetex, cbetex;
 typedef struct { uint32_t gi, tex; } bepos_t; /* gi + 1, 0 = empty; betex index */
 extern bepos_t *bepos;
+void bepos_shift(uint32_t d);
+/* Grows the grid to hold world y y0..y1 - 1 (16-aligned), up or down;
+ * 1 if that would make it over GRID_H_MAX high (nothing changes). */
+int grid_cover(int y0, int y1);
 extern uint32_t bepos_cap, nbepos;
 extern const char *skin_dir;
 extern int reg_x0, reg_z0; /* world x/z of grid cell 0 (set in main) */
@@ -485,8 +506,8 @@ typedef struct {
     int turned;
     double c, s, px, pz;
     /* iso_image_heights: per pixel drawn, the world y of what it shows
-     * (its nearest surface), as (y + 64) * 128 + 1; 0 where nothing is */
-    uint16_t **hts;
+     * (its nearest surface); NAN where nothing is */
+    double **hts;
 } iso_image_t;
 
 void iso_project(int scale, double wx, double wy, double wz, double *sx, double *sy);
@@ -496,10 +517,12 @@ void iso_image_free(iso_image_t *img);
 int iso_image_write(const iso_image_t *img, const char *path, int nthreads, long box[4]);
 /* keep the heights too (not for a turned image), and write them for the
  * box iso_image_write wrote: a PNG, the 16 bits in red (high) and green,
- * alpha 0 where nothing is. What a pixel shows is then at world y, and so
+ * alpha 0 where nothing is, (y - enc[0]) * enc[1] + 1: (y + 64) * 128 + 1
+ * unless the heights reach past what that holds (y 448 and up, a world
+ * taller than the usual). What a pixel shows is then at world y, and so
  * at x, z (iso_project backwards): the area picker's */
 void iso_image_heights(iso_image_t *img);
-int iso_image_write_heights(const iso_image_t *img, const char *path, int nthreads, const long box[4]);
+int iso_image_write_heights(const iso_image_t *img, const char *path, int nthreads, const long box[4], int enc[2]);
 int iso_draw(iso_image_t *img, mbuf_t mb[MAT_COUNT], const canvas_t *atlas, const iso_opts_t *o, const int core[4]);
 
 #endif

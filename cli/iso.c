@@ -46,7 +46,7 @@ int cmd_iso(int argc, char **argv) {
     if (x0 > x1) { int t = x0; x0 = x1; x1 = t; }
     if (z0 > z1) { int t = z0; z0 = z1; z1 = t; }
     iso_opts_t o = { .scale = 16, .ss = 1, .shadows = 1, .threads = 16, .sun = 136.4f };
-    int ymin = YMIN, rays = 16;
+    int ymin = GRID_Y0, rays = 16;
     double yaw = 0;
     for (int i = 8; i < argc; i++) {
         const char *a = argv[i], *v = i + 1 < argc ? argv[i + 1] : NULL;
@@ -62,8 +62,8 @@ int cmd_iso(int argc, char **argv) {
         else { fprintf(stderr, "unknown option %s\n", a); return 2; }
         i++;
     }
-    if (o.scale < 1 || o.scale > 64 || o.ss < 1 || o.ss > 4 || o.threads < 1 || ymin < YMIN || ymin >= YMIN + GH) {
-        fprintf(stderr, "--scale is 1..64, --ss 1..4, --ymin -64..319, --threads 1 or more\n");
+    if (o.scale < 1 || o.scale > 64 || o.ss < 1 || o.ss > 4 || o.threads < 1 || ymin < WORLD_Y_MIN || ymin > WORLD_Y_MAX) {
+        fprintf(stderr, "--scale is 1..64, --ss 1..4, --ymin -2032..4063, --threads 1 or more\n");
         return 2;
     }
     big_allocs_mapped();

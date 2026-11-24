@@ -18,11 +18,63 @@ int clip_on, clip[5];
 int window_part_on, window_part[4];
 static void clear_box(int x0, int z0, int x1, int z1, int ymin);
 
+int grid_y0 = GRID_Y0, grid_h = GRID_H, vert_y0;
+long grid_dropped;
+int grid_dropped_lo, grid_dropped_hi;
+static int grid_cap; /* layers the grid's arrays have room for */
+
+static void *grow(void *p, size_t n) {
+    p = realloc(p, n ? n : 1);
+    if (!p) { fprintf(stderr, "out of memory (%zu bytes)\n", n); exit(1); }
+    return p;
+}
+
+/* Room for h layers in every array the grid's height sizes; what is in
+ * them is kept (grid, bgrid), the rest is filled in after loading. */
+static void grid_layers(int h) {
+    if (h <= grid_cap) return;
+    size_t layer = (size_t)GW * GW, bits = (layer * h + 63) / 64 * 8;
+    grid = grow(grid, layer * h * sizeof *grid);
+    bgrid = grow(bgrid, (size_t)BW * BW * (h / 4));
+    skyl = grow(skyl, layer * h / 2);
+    occl = grow(occl, bits);
+    focc = grow(focc, bits);
+    pocc = grow(pocc, bits);
+    gocc = grow(gocc, bits);
+    grid_cap = h;
+}
+
+int grid_cover(int y0, int y1) {
+    int top = grid_y0 + grid_h;
+    if (y0 >= grid_y0 && y1 <= top) return 0;
+    int lo = y0 < grid_y0 ? y0 : grid_y0, hi = y1 > top ? y1 : top, nh = hi - lo, down = grid_y0 - lo;
+    if (nh > GRID_H_MAX) return 1;
+    /* a third more than asked, so section after section above does not
+     * realloc each time */
+    if (nh > grid_cap) {
+        int c = grid_cap + grid_cap / 3;
+        grid_layers(c > nh ? (c > GRID_H_MAX ? GRID_H_MAX : c) : nh);
+    }
+    size_t layer = (size_t)GW * GW, blayer = (size_t)BW * BW;
+    if (down) {
+        memmove(grid + layer * down, grid, layer * grid_h * sizeof *grid);
+        memset(grid, 0, layer * down * sizeof *grid);
+        memmove(bgrid + blayer * (down / 4), bgrid, blayer * (grid_h / 4));
+        memset(bgrid, 0, blayer * (down / 4));
+        bepos_shift((uint32_t)(layer * down));
+    }
+    memset(grid + layer * (down + grid_h), 0, layer * (nh - down - grid_h) * sizeof *grid);
+    memset(bgrid + blayer * ((down + grid_h) / 4), 0, blayer * ((nh - down - grid_h) / 4));
+    grid_y0 = lo;
+    grid_h = nh;
+    return 0;
+}
+
 /* "x0,z0,x1,z1,ymin" into clip, its corners put in order; 1 if it isn't */
 int parse_clip(const char *s) {
     int c[5], n = 0;
     if (sscanf(s, "%d,%d,%d,%d,%d%n", &c[0], &c[1], &c[2], &c[3], &c[4], &n) != 5 || s[n]) return 1;
-    if (c[4] < YMIN || c[4] >= YMIN + GH) return 1;
+    if (c[4] < WORLD_Y_MIN || c[4] > WORLD_Y_MAX) return 1;
     if (c[0] > c[2]) { int t = c[0]; c[0] = c[2]; c[2] = t; }
     if (c[1] > c[3]) { int t = c[1]; c[1] = c[3]; c[3] = t; }
     memcpy(clip, c, sizeof c);
@@ -34,8 +86,7 @@ int prism_open(const char *jar) {
     if (blockmodel_open(jar, &reg) != BLOCKMODEL_OK) { fprintf(stderr, "can't open %s\n", jar); return -1; }
     if (zip_open(jar, &jarzip) != ZIP_OK) { fprintf(stderr, "can't open %s\n", jar); return -1; }
     tints = tint_create(jar, reg);
-    bgrid = calloc((size_t)BW * BW * BH, 1);
-    if (!tints || !bgrid || !tint_set_shards(tints, 1)) { fprintf(stderr, "oom\n"); return -1; }
+    if (!tints || !tint_set_shards(tints, 1)) { fprintf(stderr, "oom\n"); return -1; }
     slot_hash = calloc(slot_hcap, sizeof *slot_hash);
     htab = calloc(hcap, sizeof *htab);
     cap_states = 1024;
@@ -52,10 +103,9 @@ int prism_open(const char *jar) {
 
     skin_dir = getenv("PRISM_SKINS");
     bepos = calloc(bepos_cap, sizeof *bepos);
-    grid = calloc((size_t)GW * GW * GH, sizeof *grid);
-    skyl = malloc((size_t)GW * GW * GH / 2);
-    if (!grid || !skyl) { fprintf(stderr, "oom\n"); return -1; }
-    memset(skyl, 0xFF, (size_t)GW * GW * GH / 2);
+    grid_layers(GRID_H);
+    memset(grid, 0, (size_t)GW * GW * grid_h * sizeof *grid);
+    memset(skyl, 0xFF, (size_t)GW * GW * grid_h / 2);
     /* state 0 = air, so a zeroed grid is empty */
     {
         state_t *s = &states[nstates];
@@ -64,12 +114,6 @@ int prism_open(const char *jar) {
         s->air = 1;
         htab[fnv(s->key, strlen(s->key)) & (hcap - 1)] = ++nstates;
     }
-    size_t nvox = (size_t)GW * GW * GH;
-    occl = calloc((nvox + 63) / 64, 8);
-    focc = calloc((nvox + 63) / 64, 8);
-    pocc = calloc((nvox + 63) / 64, 8);
-    gocc = calloc((nvox + 63) / 64, 8);
-    if (!occl || !focc || !pocc || !gocc) { fprintf(stderr, "oom\n"); return -1; }
     setup_dirs();
     setup_bounce();
     return 0;
@@ -155,8 +199,13 @@ static void load_region(const mca_region_t *r, int rrx, int rrz, int cmin_x, int
 void window_load(const char *rdir, int c0x, int c0z, canvas_t *atlas, long *lit, long *emitters) {
     reg_x0 = c0x * 16 - MARGIN;
     reg_z0 = c0z * 16 - MARGIN;
-    memset(grid, 0, (size_t)GW * GW * GH * sizeof *grid);
-    memset(skyl, 0xFF, (size_t)GW * GW * GH / 2);
+    /* the usual height, which load_chunk grows to what the chunks hold */
+    grid_y0 = GRID_Y0;
+    grid_h = GRID_H;
+    grid_dropped = 0;
+    grid_dropped_lo = INT_MAX;
+    grid_dropped_hi = INT_MIN;
+    memset(grid, 0, (size_t)GW * GW * grid_h * sizeof *grid);
     memset(bgrid, 0, (size_t)BW * BW * BH);
     memset(bepos, 0, bepos_cap * sizeof *bepos);
     nbepos = 0;
@@ -191,8 +240,14 @@ void window_load(const char *rdir, int c0x, int c0z, canvas_t *atlas, long *lit,
                 if (bad[k]) printf("warning: r.%d.%d.mca: %d chunks unreadable (%s), left empty\n", rrx, rrz, bad[k], mca_why(k));
         }
     /* --clip: the box alone, lit as if nothing were around it */
+    if (grid_dropped)
+        printf("warning: %ld blocks between y %d and %d left out: a region is drawn at most %d blocks high (y %d..%d here)\n",
+               grid_dropped, grid_dropped_lo, grid_dropped_hi, GRID_H_MAX, grid_y0, grid_y0 + grid_h - 1);
+    /* int16 vertices in 1/POS_Q block reach 511 either way of vert_y0 */
+    vert_y0 = grid_y0 >= -504 && grid_y0 + grid_h <= 504 ? 0 : grid_y0 + grid_h / 2;
     if (clip_on) clear_box(clip[0], clip[1], clip[2], clip[3], clip[4]);
-    size_t nvox = (size_t)GW * GW * GH;
+    size_t nvox = (size_t)GW * GW * grid_h;
+    memset(skyl, 0xFF, nvox / 2);
     memset(occl, 0, (nvox + 63) / 64 * 8);
     memset(focc, 0, (nvox + 63) / 64 * 8);
     memset(pocc, 0, (nvox + 63) / 64 * 8);
@@ -247,11 +302,11 @@ void light_caches_clear(void) {
  * below ymin, emptied from the grid, and the chunks and rows left with
  * nothing marked for mesh_pass to skip. */
 static void clear_box(int x0, int z0, int x1, int z1, int ymin) {
-    int below = ymin - YMIN < 0 ? 0 : ymin - YMIN > GH ? GH : ymin - YMIN;
+    int below = ymin - grid_y0 < 0 ? 0 : ymin - grid_y0 > grid_h ? grid_h : ymin - grid_y0;
     /* the area's x span in grid cells, clamped; in the grid's own order */
     int ax0 = x0 - reg_x0, ax1 = x1 - reg_x0, az0 = z0 - reg_z0, az1 = z1 - reg_z0;
     ax0 = ax0 < 0 ? 0 : ax0; ax1 = ax1 >= GW ? GW - 1 : ax1;
-    for (int y = 0; y < GH; y++)
+    for (int y = 0; y < grid_h; y++)
         for (int z = 0; z < GW; z++) {
             uint16_t *row = &grid[gidx(0, y, z)];
             if (y < below || z < az0 || z > az1 || ax0 > ax1) { memset(row, 0, GW * sizeof *row); continue; }

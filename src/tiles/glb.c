@@ -113,13 +113,16 @@ int write_glb(const char *path, mbuf_t merged[MAT_COUNT], size_t tile_q0[MAT_COU
         free(pq); free(uq);
     }
     str_t json = { 0 };
+    /* the vertices' y is from vert_y0 */
+    char oy[48] = "";
+    if (vert_y0) snprintf(oy, sizeof oy, ",\"translation\":[0,%d,0]", vert_y0);
     sappend(&json,
         "{\"asset\":{\"version\":\"2.0\",\"generator\":\"prism\"},"
         "\"extensionsUsed\":[\"KHR_materials_unlit\",\"KHR_mesh_quantization\"],"
         "\"extensionsRequired\":[\"KHR_mesh_quantization\"],"
-        "\"scene\":0,\"scenes\":[{\"nodes\":[0]}],\"nodes\":[{\"mesh\":0,\"scale\":[%g,%g,%g]}],"
+        "\"scene\":0,\"scenes\":[{\"nodes\":[0]}],\"nodes\":[{\"mesh\":0,\"scale\":[%g,%g,%g]%s}],"
         "\"meshes\":[{\"primitives\":[%s]}],\"materials\":[",
-        1 / POS_Q, 1 / POS_Q, 1 / POS_Q, prims.p ? prims.p : "");
+        1 / POS_Q, 1 / POS_Q, 1 / POS_Q, oy, prims.p ? prims.p : "");
     for (int m = 0; m < MAT_COUNT; m++)
         sappend(&json, "%s{\"name\":\"%s\",\"pbrMetallicRoughness\":{\"baseColorTexture\":{\"index\":0},\"metallicFactor\":0,\"roughnessFactor\":1},"
                 "\"alphaMode\":\"%s\"%s,\"doubleSided\":%s,\"extensions\":{\"KHR_materials_unlit\":{}}}",

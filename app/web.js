@@ -299,7 +299,7 @@ export async function webBackend() {
        is the same; one at a time, each taking a bake's memory. OVERVIEW
        goes up when prism overview draws differently, so the kept ones are
        drawn again (prism serve goes by prism's own date instead). */
-    const OVERVIEW = 4;
+    const OVERVIEW = 5;
     const overviews = await root.getDirectoryHandle("overviews", { create: true });
     let ovChain = Promise.resolve();
     async function overview(id, ver, rx, rz) {

@@ -31,7 +31,7 @@ static int write_text(const char *path, const char *s) { return write_atomic(pat
 /* The ground of the window's quarter at qx, qz (chunks), loaded: the
  * lowest tenth of its columns' tops, world y; INT_MAX if it has none */
 static int ground_of(int qx, int qz) {
-    static int count[GH + 1];
+    static int count[GRID_H_MAX + 1];
     memset(count, 0, sizeof count);
     int n = 0;
     for (int z = 0; z < Q * 16; z++)
@@ -42,9 +42,9 @@ static int ground_of(int qx, int qz) {
         }
     if (!n) return INT_MAX;
     int y = 0;
-    for (int seen = 0; y < GH; y++)
+    for (int seen = 0; y < grid_h; y++)
         if ((seen += count[y]) * 10 >= n) break;
-    return y + YMIN;
+    return y + grid_y0;
 }
 
 int cmd_overview(int argc, char **argv) {
@@ -74,8 +74,8 @@ int cmd_overview(int argc, char **argv) {
         n++;
         i++;
     }
-    if (!n || o.scale < 1 || o.scale > 16 || o.threads < 1 || ymin < YMIN || ymin >= YMIN + GH) {
-        fprintf(stderr, "--scale is 1..16, --ymin -64..319, --threads 1 or more, and a region at least\n");
+    if (!n || o.scale < 1 || o.scale > 16 || o.threads < 1 || ymin < WORLD_Y_MIN || ymin > WORLD_Y_MAX) {
+        fprintf(stderr, "--scale is 1..16, --ymin -2032..4063, --threads 1 or more, and a region at least\n");
         return 2;
     }
     big_allocs_mapped();
@@ -92,8 +92,9 @@ int cmd_overview(int argc, char **argv) {
         int x0 = rx * REG, z0 = rz * REG, x1 = x0 + REG - 1, z1 = z0 + REG - 1;
         char path[4096], json[256];
         long box[4] = { 0, 0, 0, 0 }, quads = 0;
+        int enc[2] = { -64, 128 };
         iso_image_t img;
-        int made = !iso_image_init(&img, o.scale, 0, x0, z0, x1, z1, fixed ? ymin : YMIN), bad = !made, low = ymin, ground = INT_MAX;
+        int made = !iso_image_init(&img, o.scale, 0, x0, z0, x1, z1, fixed ? ymin : grid_y0), bad = !made, low = ymin, ground = INT_MAX;
         if (made) iso_image_heights(&img);
         /* a quarter of the region at a time, back (-x, -z) to front, each
          * loaded with BACK chunks behind it meshed too: what its water looks
@@ -116,7 +117,7 @@ int cmd_overview(int argc, char **argv) {
             /* only below ymin: the world around stays, so the edges aren't cut */
             int g = chunks_loaded ? ground_of(qx, qz) : INT_MAX, cut = ymin;
             if (g < ground) ground = g;
-            if (!fixed && g != INT_MAX && g - 8 < cut) cut = g - 8 < YMIN ? YMIN : g - 8;
+            if (!fixed && g != INT_MAX && g - 8 < cut) cut = g - 8 < grid_y0 ? grid_y0 : g - 8;
             if (cut < low) low = cut;
             window_clear_outside(x0 - REG, z0 - REG, x1 + REG, z1 + REG, cut);
             for (int c = 0; c < 32 * 32; c++) mesh_skip[c] = c % 32 >= BACK + Q || c / 32 >= BACK + Q;
@@ -140,7 +141,7 @@ int cmd_overview(int argc, char **argv) {
             if (iso_image_write(&img, path, o.threads, box)) bad = 1;
             else {
                 snprintf(path, sizeof path, "%s/r.%d.%d.h.png", out, rx, rz);
-                if (iso_image_write_heights(&img, path, o.threads, box)) bad = 1;
+                if (iso_image_write_heights(&img, path, o.threads, box, enc)) bad = 1;
             }
         }
         if (bad) {
@@ -149,8 +150,12 @@ int cmd_overview(int argc, char **argv) {
             box[2] = 0;
         }
         if (made) iso_image_free(&img);
-        snprintf(json, sizeof json, "{\"scale\":%d,\"ymin\":%d,\"ground\":%d,\"x\":%ld,\"y\":%ld,\"w\":%ld,\"h\":%ld}\n", o.scale,
-                 low, ground == INT_MAX ? 63 : ground, box[0], box[1], box[2], box[3]);
+        /* hy, hk: the heights picture's encoding, (y - hy) * hk + 1, when
+         * not the usual -64, 128 (iso_image_write_heights) */
+        char hk[64] = "";
+        if (enc[0] != -64 || enc[1] != 128) snprintf(hk, sizeof hk, ",\"hy\":%d,\"hk\":%d", enc[0], enc[1]);
+        snprintf(json, sizeof json, "{\"scale\":%d,\"ymin\":%d,\"ground\":%d,\"x\":%ld,\"y\":%ld,\"w\":%ld,\"h\":%ld%s}\n", o.scale,
+                 low, ground == INT_MAX ? 63 : ground, box[0], box[1], box[2], box[3], hk);
         snprintf(path, sizeof path, "%s/r.%d.%d.json", out, rx, rz);
         if (write_text(path, json)) { fprintf(stderr, "can't write %s\n", path); return 1; }
         printf("r.%d.%d: %ld x %ld px, %.2f s\n", rx, rz, box[2], box[3], now_s() - t0);

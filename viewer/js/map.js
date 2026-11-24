@@ -300,7 +300,10 @@ export function setupMap(app) {
             let w = 0;
             for (const r of m.regions) {
                 if (r.tiles === 0) continue;
-                app.map.regions.push({ base: `${dir}/${r.dir}`, x0: r.rx * 512, z0: r.rz * 512, state: "out", tiles: [], merged: [], mergedOn: false });
+                /* y: the lowest and highest column top in it; without it,
+                   the usual height */
+                app.map.regions.push({ base: `${dir}/${r.dir}`, x0: r.rx * 512, z0: r.rz * 512, y0: Math.min(-64, r.y ? r.y[0] : 0),
+                                       y1: Math.max(320, r.y ? r.y[1] : 0), state: "out", tiles: [], merged: [], mergedOn: false });
                 /* the mean of the tiles' centres (64 blocks each), or of the regions' */
                 if (r.tx === undefined) { app.map.centre.x += r.rx * 512 + 256; app.map.centre.z += r.rz * 512 + 256; w++; continue; }
                 app.map.centre.x += (r.rx * 512 + 32) * r.tiles + 64 * r.tx; app.map.centre.z += (r.rz * 512 + 32) * r.tiles + 64 * r.tz; w += r.tiles;
@@ -339,18 +342,24 @@ export function setupMap(app) {
             region.solid = idx.solid || 0; /* solid.bin's length, for walk.js; 0 baked before it */
             region.group = new THREE.Group();
             region.mats = regionMaterials(`${base}/${idx.atlas}`);
-            region.group.position.set(idx.origin[0], 0, idx.origin[1]);
+            /* oy: the world y the vertices are from, for a world taller than int16 holds from 0 */
+            region.group.position.set(idx.origin[0], idx.oy || 0, idx.origin[1]);
             region.group.scale.setScalar(1 / 64);
             region.group.updateMatrixWorld(true);
             const byXZ = new Map();
             /* tx, tz, quads per level and in the shared part, then the offset
                in tiles.bin and the lengths of level 0's part, the shared part
                and level 1's */
-            for (const [tx, tz, q0, q1, q2, qs, ...at] of idx.tiles)
+            /* ty: each tile's lowest and highest column top; the distances
+               go by those and by where most of a world is (40..120) */
+            idx.tiles.forEach(([tx, tz, q0, q1, q2, qs, ...at], i) => {
+                const ty = idx.ty && idx.ty[i];
                 byXZ.set(`${tx},${tz}`, { region, tx, tz, quads: [q0, q1, q2, qs], at, lod: [null, null, null], want: [false, false],
+                                          y0: Math.min(40, ty ? ty[0] : 40), y1: Math.max(120, ty ? ty[1] : 120),
                                           fails: [0, 0], retry: [0, 0], shown: -1,
                                           x: idx.origin[0] - 256 + tx * idx.tile + idx.tile / 2,
                                           z: idx.origin[1] - 256 + tz * idx.tile + idx.tile / 2, half: idx.tile / 2 });
+            });
             region.tiles = [...byXZ.values()];
             /* level 2 for the whole region in one go: per tile, and merged
                into one mesh per material for when all of them are coarse
@@ -406,7 +415,7 @@ export function setupMap(app) {
         const cam = camera.position, near = scene.fog.far, wanted = [];
         for (const r of app.map.regions) {
             const dx = Math.max(r.x0 - cam.x, cam.x - r.x0 - 512, 0), dz = Math.max(r.z0 - cam.z, cam.z - r.z0 - 512, 0);
-            const d = Math.hypot(dx, Math.max(cam.y - 320, -64 - cam.y, 0), dz);
+            const d = Math.hypot(dx, Math.max(cam.y - r.y1, r.y0 - cam.y, 0), dz);
             if (r.state === "out" && d < near && !(r.retry > performance.now())) wanted.push([d, r]);
             else if (r.state === "in" && d > near * LOD_DROP) unloadRegion(r);
         }
@@ -423,7 +432,7 @@ export function setupMap(app) {
         let changed = false, shown = [0, 0, 0], quads = 0, used = 0, held = 0;
         for (const t of app.map.tiles) {
             const dx = Math.max(Math.abs(cam.x - t.x) - t.half, 0), dz = Math.max(Math.abs(cam.z - t.z) - t.half, 0);
-            const dy = Math.max(cam.y - 120, 40 - cam.y, 0);
+            const dy = Math.max(cam.y - t.y1, t.y0 - cam.y, 0);
             t.d = Math.hypot(dx, dy, dz);
             t.dl = t.d * zoomK.value;
             used += t.quads[2];
@@ -514,8 +523,8 @@ export function setupMap(app) {
         swayFrustum.setFromProjectionMatrix(swayM.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
         for (const t of app.map.tiles) {
             if (t.shown !== 0 || t.d > far) continue;
-            swayBox.min.set(t.x - t.half, -64, t.z - t.half);
-            swayBox.max.set(t.x + t.half, 320, t.z + t.half);
+            swayBox.min.set(t.x - t.half, Math.min(-64, t.y0), t.z - t.half);
+            swayBox.max.set(t.x + t.half, Math.max(320, t.y1), t.z + t.half);
             if (swayFrustum.intersectsBox(swayBox)) return true;
         }
         return false;

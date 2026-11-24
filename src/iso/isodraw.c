@@ -121,7 +121,7 @@ typedef struct {
     int shadows;
     float Vn[3];
     _Atomic uint8_t *seen; /* light_defer: per quad, it shows in the core's pixels */
-    double dw, sox, soy; /* world depth of local depth 0 (cx + cz); the window's corner, internal pixels */
+    double dw, sox, soy; /* world depth of local depth 0 (cx + cz + vert_y0); the window's corner, internal pixels */
 } iso_t;
 
 static float smoothstepf(float e0, float e1, float x) {
@@ -394,7 +394,8 @@ typedef struct {
 } pjob_t;
 
 static void project(const iso_t *I, double cx, double cz, const float p[3], double *sx, double *sy, float *d) {
-    double S = (double)I->scale * I->ss, wx = p[0] + cx, wy = p[1], wz = p[2] + cz;
+    /* the mesh's y is from vert_y0 (a world taller than int16 holds from 0) */
+    double S = (double)I->scale * I->ss, wx = p[0] + cx, wy = p[1] + vert_y0, wz = p[2] + cz;
     const iso_image_t *g = I->img;
     if (g->turned) {
         /* turned about the pivot: the projection of x', z' */
@@ -968,13 +969,12 @@ static void *draw_worker(void *arg) {
                         }
                     if (best > -1e29f) {
                         if (!img->hts[y]) {
-                            img->hts[y] = calloc((size_t)img->w, sizeof **img->hts);
+                            img->hts[y] = malloc((size_t)img->w * sizeof **img->hts);
                             if (!img->hts[y]) { fprintf(stderr, "out of memory for the image\n"); exit(1); }
+                            for (int k = 0; k < img->w; k++) img->hts[y][k] = NAN;
                         }
                         double S = (double)I->scale * ss, sy = I->soy + B->y0 + r * ss + ss * 0.5;
-                        double wy = (best + I->dw - 2 * (sy - S / 2) / S + 640) / 3;
-                        double v = (wy + 64) * 128 + 1;
-                        img->hts[y][gx] = (uint16_t)(v < 1 ? 1 : v > 65535 ? 65535 : lrint(v));
+                        img->hts[y][gx] = (best + I->dw - 2 * (sy - S / 2) / S + 640) / 3;
                     }
                 }
                 if (gx < img->x0[y]) img->x0[y] = gx;
@@ -1013,11 +1013,13 @@ int iso_image_init(iso_image_t *img, int scale, double yaw, int x0, int z0, int 
         img->pz = (z0 + z1 + 1) / 2.0;
     } else
         img->c = 1;
-    /* the box's corners, ymin to the world's top */
+    /* the box's corners, ymin to the top a world can have (a dimension
+     * taller than the usual -64..319): rows are only allocated where
+     * something is drawn, and iso_image_write crops to them */
     double lo[2] = { 1e300, 1e300 }, hi[2] = { -1e300, -1e300 };
     for (int k = 0; k < 8; k++) {
         double sx, sy;
-        iso_image_project(img, scale, k & 1 ? x1 + 1 : x0, k & 2 ? 320 : ymin, k & 4 ? z1 + 1 : z0, &sx, &sy);
+        iso_image_project(img, scale, k & 1 ? x1 + 1 : x0, k & 2 ? WORLD_Y_MAX + 1 : ymin, k & 4 ? z1 + 1 : z0, &sx, &sy);
         if (sx < lo[0]) lo[0] = sx;
         if (sx > hi[0]) hi[0] = sx;
         if (sy < lo[1]) lo[1] = sy;
@@ -1085,9 +1087,23 @@ void iso_image_heights(iso_image_t *img) {
     if (!img->hts) { fprintf(stderr, "out of memory for the image\n"); exit(1); }
 }
 
-int iso_image_write_heights(const iso_image_t *img, const char *path, int nthreads, const long box[4]) {
+int iso_image_write_heights(const iso_image_t *img, const char *path, int nthreads, const long box[4], int enc[2]) {
     if (!img->hts || box[2] <= 0) return 1;
     int x0 = (int)(box[0] - img->ox), y0 = (int)(box[1] - img->oy), w = (int)box[2], h = (int)box[3];
+    /* (y + 64) * 128 + 1 as ever, clamped, while the heights fit in it;
+     * else from the lowest, as fine as 16 bits hold them all */
+    double lo = INFINITY, hi = -INFINITY;
+    for (int y = 0; y < h; y++) {
+        const double *s = img->hts[y0 + y];
+        for (int x = 0; s && x < w; x++)
+            if (!isnan(s[x0 + x])) { if (s[x0 + x] < lo) lo = s[x0 + x]; if (s[x0 + x] > hi) hi = s[x0 + x]; }
+    }
+    enc[0] = -64;
+    enc[1] = 128;
+    if (lo <= hi && (lo < -65 || (hi + 64) * 128 + 1 > 65535)) {
+        enc[0] = (int)floor(lo);
+        while (enc[1] > 1 && (hi - enc[0]) * enc[1] + 1 > 65535) enc[1] /= 2;
+    }
     png_stream_t *st = png_stream_begin(path, (uint32_t)w, (uint32_t)h, 6, nthreads);
     if (!st) { fprintf(stderr, "can't write %s\n", path); return 1; }
     enum { ROWS = 64 };
@@ -1096,9 +1112,10 @@ int iso_image_write_heights(const iso_image_t *img, const char *path, int nthrea
         int n = h - y < ROWS ? h - y : ROWS;
         for (int r = 0; r < n; r++) {
             uint8_t *d = canvas_row(&band, (uint32_t)r);
-            const uint16_t *s = img->hts[y0 + y + r];
+            const double *s = img->hts[y0 + y + r];
             for (int x = 0; x < w; x++) {
-                uint16_t v = s ? s[x0 + x] : 0;
+                double f = s ? s[x0 + x] : NAN, e = (f - enc[0]) * enc[1] + 1;
+                uint16_t v = isnan(f) ? 0 : (uint16_t)(e < 1 ? 1 : e > 65535 ? 65535 : lrint(e));
                 d[x * 4] = (uint8_t)(v >> 8); d[x * 4 + 1] = (uint8_t)v; d[x * 4 + 2] = 0; d[x * 4 + 3] = v ? 255 : 0;
             }
         }
@@ -1164,7 +1181,7 @@ int iso_draw(iso_image_t *img, mbuf_t mb[MAT_COUNT], const canvas_t *atlas, cons
     I.W = ow * ss;
     I.H = oh * ss;
     double ox = (double)(img->ox + px0) * ss, oy = (double)(img->oy + py0) * ss;
-    I.dw = cx + cz; I.sox = ox; I.soy = oy;
+    I.dw = cx + cz + vert_y0; I.sox = ox; I.soy = oy;
     build_mip(&I);
     if (I.shadows) build_smap(&I, mb, nthreads);
     I.nq = q0[MAT_COUNT];

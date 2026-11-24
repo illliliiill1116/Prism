@@ -109,7 +109,7 @@ int ray_free(const float o[3], const float d[3], float maxd, int leaf) {
         if (a == 0) ix += step[0]; else if (a == 1) iy += step[1]; else iz += step[2];
         tmax[a] += tdel[a];
     test:
-        if (ix < 0 || iz < 0 || ix >= GW || iz >= GW || iy >= GH) return 1;
+        if (ix < 0 || iz < 0 || ix >= GW || iz >= GW || iy >= grid_h) return 1;
         if (iy > occ_top && step[1] >= 0) return 1;
         if (iy < 0) return 0;
         if (occ_at(ix, iy, iz) && !occ_miss(ix, iy, iz, o, d, tin, fminf(fminf(tmax[0], tmax[1]), tmax[2]))
@@ -219,7 +219,7 @@ static float ray_far_vis(const float o[3], const float d[3], float maxd, int lea
         if (a == 0) ix += step[0]; else if (a == 1) iy += step[1]; else iz += step[2];
         tmax[a] += tdel[a];
     test:
-        if (ix < 0 || iz < 0 || ix >= GW || iz >= GW || iy >= GH) break;
+        if (ix < 0 || iz < 0 || ix >= GW || iz >= GW || iy >= grid_h) break;
         if (iy > occ_top && step[1] >= 0) break;
         if (iy < 0) return 0;
         int solid = occ_at(ix, iy, iz) && !occ_miss(ix, iy, iz, o, d, t, fminf(fminf(tmax[0], tmax[1]), tmax[2]));
@@ -276,7 +276,7 @@ static float block_flood_at(const float p[3], const float n[3]) {
     for (int k = 0; k < 8; k++) {
         int x = i0[0] + (k & 1), y = i0[1] + (k >> 1 & 1), z = i0[2] + (k >> 2 & 1);
         float w = ((k & 1) ? f[0] : 1 - f[0]) * ((k >> 1 & 1) ? f[1] : 1 - f[1]) * ((k >> 2 & 1) ? f[2] : 1 - f[2]);
-        if (w <= 0 || x < 0 || z < 0 || x >= GW || z >= GW || y < 0 || y >= GH) continue;
+        if (w <= 0 || x < 0 || z < 0 || x >= GW || z >= GW || y < 0 || y >= grid_h) continue;
         size_t i = gidx(x, y, z);
         const state_t *st = &states[grid[i]];
         if (st->cull && !st->emit) continue;
@@ -306,7 +306,7 @@ static int ray_to(const float o[3], const float d[3], float maxd, int tx, int ty
         if (a == 0) ix += step[0]; else if (a == 1) iy += step[1]; else iz += step[2];
         tmax[a] += tdel[a];
         if (ix == tx && iy == ty && iz == tz) return 1;
-        if (ix < 0 || iz < 0 || ix >= GW || iz >= GW || iy < 0 || iy >= GH) return 1;
+        if (ix < 0 || iz < 0 || ix >= GW || iz >= GW || iy < 0 || iy >= grid_h) return 1;
         float tout = fminf(fminf(tmax[0], tmax[1]), tmax[2]);
         if (occ_at(ix, iy, iz) && !occ_miss(ix, iy, iz, o, d, tin, tout)) return 0;
         if (gocc_at(ix, iy, iz)) {
@@ -542,7 +542,7 @@ static void bake(const float p[3], const float n[3], int leaf, float out[3], flo
         float att = 1;
         if (states[gget(ox, oy, oz)].fluid == FLUID_WATER) {
             int y = oy;
-            while (y + 1 < GH && states[gget(ox, y + 1, oz)].fluid == FLUID_WATER) y++;
+            while (y + 1 < grid_h && states[gget(ox, y + 1, oz)].fluid == FLUID_WATER) y++;
             float depth = (float)y + states[gget(ox, y, oz)].fluid_h / 16.0f - o[1];
             att = dexpf(-WATER_EXT * ((depth < 0 ? 0 : depth) + WATER_MIN_DEPTH));
             asum += att;

@@ -18,7 +18,7 @@ static inline int coarse_solid(int x, int y, int z) {
 static inline int fine_kind(int x, int y, int z) {
     if (mesh_y0 && y < mesh_y0) return 0; /* cut away (--clip) */
     if (y < 0) return 1;
-    if (y >= GH) return 0;
+    if (y >= grid_h) return 0;
     if (coarse_solid(x, y, z) || is_cave(x, y, z)) return 1;
     return states[gget(x, y, z)].fluid == FLUID_WATER ? 2 : 0;
 }
@@ -68,9 +68,10 @@ void prepare_face_colors(void) {
 void mesh_coarse(worker_t *w, int cx, int cz) {
     enum { N = 16 / CK + 2 };
     static _Thread_local uint8_t *kind; /* [y][cz][cx] over the chunk's cells plus a border */
-    if (!kind) kind = xmalloc((size_t)GH * N * N);
+    static _Thread_local int kind_h;
+    if (kind_h < grid_h) { free(kind); kind = xmalloc((size_t)grid_h * N * N); kind_h = grid_h; }
     int x0 = MARGIN + cx * 16 - CK, z0 = MARGIN + cz * 16 - CK; /* grid block of cell (0,0) */
-    for (int y = 0; y < GH; y++)
+    for (int y = 0; y < grid_h; y++)
         for (int j = 0; j < N; j++)
             for (int i = 0; i < N; i++) {
                 int n = 0, wat = 0;
@@ -81,9 +82,9 @@ void mesh_coarse(worker_t *w, int cx, int cz) {
                     }
                 kind[((size_t)y * N + j) * N + i] = n * 4 >= CK * CK ? 1 : wat * 2 >= CK * CK ? 2 : 0;
             }
-#define KIND(i, y, j) ((y) < 0 ? 1 : (y) >= GH ? 0 : kind[((size_t)(y) * N + (j)) * N + (i)])
+#define KIND(i, y, j) ((y) < 0 ? 1 : (y) >= grid_h ? 0 : kind[((size_t)(y) * N + (j)) * N + (i)])
     const float full_uv[4] = { 0, 0, 16, 16 };
-    for (int y = 0; y < GH; y++)
+    for (int y = 0; y < grid_h; y++)
         for (int j = 1; j < N - 1; j++)
             for (int i = 1; i < N - 1; i++) {
                 int k = KIND(i, y, j);

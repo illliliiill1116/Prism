@@ -19,12 +19,12 @@ static void put(uint8_t *p, uint32_t v, int n) { for (int i = 0; i < n; i++) p[i
 
 static void solid_tile(int t, bytes_t *out, int *ylo, int *rows, int *overflow) {
     const int TW = 32 / TILE_CHUNKS, x0 = MARGIN + t % TW * TB, z0 = MARGIN + t / TW * TB;
-    int lo = GH, hi = -1;
-    for (int y = 0; y < GH; y++)
+    int lo = grid_h, hi = -1;
+    for (int y = 0; y < grid_h; y++)
         for (int z = z0; z < z0 + TB && (lo > y || hi < y); z++)
             for (int x = x0; x < x0 + TB; x++)
                 if (states[grid[gidx(x, y, z)]].coll) { if (y < lo) lo = y; hi = y; break; }
-    *ylo = lo + YMIN;
+    *ylo = lo + grid_y0;
     *rows = hi < lo ? 0 : hi - lo + 1;
     out->n = 0;
     if (!*rows) return;
