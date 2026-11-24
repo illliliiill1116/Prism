@@ -71,10 +71,14 @@ function serverBackend() {
 }
 
 /* The browser's own: its threads need the page cross-origin isolated,
-   which sw.js does (a reload, the first time). */
+   which sw.js does (a reload, the first time). It has to be this sw.js:
+   another site's on the same host, registered further up (the host's
+   root), isolates the page too but doesn't serve maps/ from the storage,
+   so the viewer finds none. */
 async function browserBackend() {
     if (!("serviceWorker" in navigator) || !("showDirectoryPicker" in window)) return null;
-    if (!crossOriginIsolated) {
+    const ctl = navigator.serviceWorker.controller;
+    if (!crossOriginIsolated || !ctl || ctl.scriptURL !== new URL("sw.js", location.href).href) {
         await navigator.serviceWorker.register("sw.js");
         await navigator.serviceWorker.ready;
         let tries = 0;
