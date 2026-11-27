@@ -27,7 +27,12 @@ export function setupAir(app) {
     /* MIST_Y: the ground mist's level, the map's water surface (map.json's
        "sea", see map.js: uMistY); 62, the top water block of a world at the
        game's sea level, until a map says */
-    const MIST_Y = 62, MIST_H = 14, MIST = q.has("mist") ? Number(q.get("mist")) : 1; /* see the haze */
+    const MIST_Y = 62, MIST_H = 14;
+    /* the mist's strength (see the haze): ?mist=, or 1; the MIST button and
+       M key take it to 0 and back, and the choice is kept for this browser
+       when the address does not say. A valley village under a map's water
+       level stands in the mist whatever its strength, so it is a switch. */
+    const MIST = q.has("mist") ? Number(q.get("mist")) || 0 : 1;
     const RAYS = q.has("rays") ? Number(q.get("rays")) : 1;
     const RAY_STEPS = 16, RAY_FAR = 64, RAY_DENS = 0.00072;
     const rayU = {
@@ -35,7 +40,7 @@ export function setupAir(app) {
         tRay2: { value: null }, uRayMat2: { value: new THREE.Matrix4() }, uRayMix: { value: 0 },
         uRayHere: { value: 1 }, /* 1: in the materials' haze (FX off); 0: ShaftPass does it */
         uRayCol: { value: new THREE.Color(0, 0, 0) }, uRaySun: { value: SUN_DIR },
-        uMistY: { value: MIST_Y },
+        uMistY: { value: MIST_Y }, uMist: { value: MIST },
     };
     /* 0..1, how shaded the eye is (see eyeShade): worked out once a frame into a
      * 1x1 target (renderEyeShade), the same for every pixel */
@@ -62,7 +67,7 @@ float eyeShade() {
 void main() { gl_FragColor = vec4(mix(texture2D(tPrev, vec2(0.5)).r, eyeShade(), uK), 0.0, 0.0, 1.0); }`;
     const RAY_GLSL = `uniform sampler2D tRay, tRay2, tEye;
 uniform mat4 uRayMat, uRayMat2;
-uniform float uRayOn, uRayRange, uRayMix, uRayHere, uMistY;
+uniform float uRayOn, uRayRange, uRayMix, uRayHere, uMistY, uMist;
 /* 1 where the sun reaches p, by one map of the pair */
 float rayVis(sampler2D map, mat4 m, vec3 p) {
 	vec3 sp = (m * vec4(p, 1.0)).xyz * 0.5 + 0.5;
@@ -111,7 +116,7 @@ vec3 lightShafts(vec3 p0, vec3 p1) {
 			vis = mix(1.0, v, useMap);
 		}
 		float mist = exp(-clamp((p.y - uMistY) / ${MIST_H.toFixed(1)}, 0.0, 40.0)); /* as fog_fragment's */
-		sum += vis * (1.0 + ${(5 * MIST).toFixed(2)} * mist) * ds;
+		sum += vis * (1.0 + 5.0 * uMist * mist) * ds;
 	}
 	return uRayCol * phase * sum * shade * ${(RAY_DENS * RAYS).toFixed(6)};
 }`;
@@ -132,7 +137,7 @@ uniform vec3 fogColor;
 uniform float fogNear, fogFar;
 varying float vFogDepth;
 varying vec3 vFogWorld;
-${RAYS > 0 ? RAY_GLSL : "uniform float uMistY;"}
+${RAYS > 0 ? RAY_GLSL : "uniform float uMistY, uMist;"}
 #endif`;
     FOG.fog_fragment = `#ifdef USE_FOG
 	{
@@ -146,7 +151,7 @@ ${RAYS > 0 ? RAY_GLSL : "uniform float uMistY;"}
 		float ya = min(cameraPosition.y, vFogWorld.y), yb = max(cameraPosition.y, vFogWorld.y), h = yb - ya;
 		float ea = exp(-clamp((ya - uMistY) * k, 0.0, 40.0)), eb = exp(-clamp((yb - uMistY) * k, 0.0, 40.0));
 		float mean = h * k < 1e-3 ? ea : (clamp(uMistY - ya, 0.0, h) + (ea - eb) / k) / h;
-		float mist = 1.0 - exp(-${(0.0016 * MIST).toFixed(5)} * length(rd) * mean);
+		float mist = 1.0 - exp(-0.0016 * uMist * length(rd) * mean);
 		float fogFactor = 1.0 - (1.0 - smoothstep(fogNear, fogFar, vFogDepth)) * (1.0 - mist);
 		float Y = dot(gl_FragColor.rgb, vec3(0.2126, 0.7152, 0.0722));
 		gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(Y), fogFactor * 0.6);
@@ -184,5 +189,20 @@ ${RAYS > 0 ? RAY_GLSL : "uniform float uMistY;"}
         scene.fog.far = look + Math.max(1000, look);
     }
 
-    Object.assign(app, { EYE_GLSL, MIST_Y, RAYS, RAY_FAR, RAY_GLSL, fitFog, lookDist, patchFog, rayU });
+    /* the mist switch */
+    const mistBtn = app.el("mist"), MIST_KEY = "prism.mist";
+    function setMist(on, keep = true) {
+        rayU.uMist.value = on ? MIST || 1 : 0;
+        mistBtn.classList.toggle("on", on);
+        mistBtn.title = on ? "ground mist: on (M)" : "ground mist: off (M)";
+        if (keep) try { localStorage.setItem(MIST_KEY, on ? "1" : "0"); } catch {}
+        if (app.draw) app.draw();
+    }
+    let mistOn = MIST > 0;
+    if (!q.has("mist")) try { const v = localStorage.getItem(MIST_KEY); if (v !== null) mistOn = v === "1"; } catch {}
+    setMist(mistOn, false);
+    mistBtn.addEventListener("click", () => { mistBtn.blur(); setMist(!(rayU.uMist.value > 0)); });
+    app.on(app.keys, "keydown", e => { if (e.code === "KeyM" && !e.ctrlKey && !e.metaKey && !e.altKey) setMist(!(rayU.uMist.value > 0)); });
+
+    Object.assign(app, { EYE_GLSL, MIST_Y, setMist, RAYS, RAY_FAR, RAY_GLSL, fitFog, lookDist, patchFog, rayU });
 }

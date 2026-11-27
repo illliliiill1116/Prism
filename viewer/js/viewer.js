@@ -65,7 +65,7 @@ const UI = `
 </div>
 <div class="prism-fxp prism-panel"><button class="prism-fly" title="fly (V)">${FLY_ICON}</button><button
   class="prism-camb" title="camera (C)">CAM</button><button class="prism-full" title="full screen">${FULL_ICON}</button><button
-  class="prism-helpb" title="help (?)">?</button></div>
+  class="prism-mist on" title="ground mist: on (M)">MIST</button><button class="prism-helpb" title="help (?)">?</button></div>
 <div class="prism-help prism-panel" hidden><button class="prism-helpx" title="close (Esc)">×</button>
   <dl>
     <dt>Look around</dt><dd>drag; right-drag pans, the wheel or the bar on the right zooms</dd>
@@ -74,7 +74,7 @@ const UI = `
     <dt>Walk</dt><dd><kbd>G</kbd> while flying; <kbd>W</kbd> twice or <kbd>Shift</kbd> runs, <kbd>Space</kbd> jumps, swims and climbs</dd>
     <dt>Time of day</dt><dd>the slider top left, or <kbd>[</kbd> <kbd>]</kbd>; <kbd>T</kbd> or ▶ lets the day go by</dd>
     <dt>Camera</dt><dd><kbd>C</kbd> or CAM: focal length, exposure, white balance, aperture</dd>
-    <dt>More</dt><dd><kbd>P</kbd> photo, <kbd>F</kbd> effects on/off, <kbd>H</kbd> hide the controls, <kbd>?</kbd> this help</dd>
+    <dt>More</dt><dd><kbd>P</kbd> photo, <kbd>F</kbd> effects on/off, <kbd>M</kbd> or MIST ground mist on/off, <kbd>H</kbd> hide the controls, <kbd>?</kbd> this help</dd>
   </dl>
 </div>
 <div class="prism-camp prism-panel" hidden>

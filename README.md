@@ -174,6 +174,8 @@ site, see [docs/embedding.md](docs/embedding.md).
   the day go by.
 - **F** toggles the effects (grading, bloom, tilt-shift, light shafts),
   which are on to begin with.
+- **M** or MIST switches the ground mist (the haze lying on the map's
+  water level) off and on; the browser remembers it.
 - **C** or CAM opens the camera panel: focal length, exposure, white
   balance and aperture.
 - **P** saves a photo, up to 4× the screen size. **H** hides the controls.
@@ -312,7 +314,7 @@ downloads more of what is near.
 - Water is naive: a flat surface with made-up ripples, which mirrors only
   what is on the screen (and the sky where that runs out).
 - The haze and the ground mist are tuned by eye on a few maps; close to
-  the water they can be too thick.
+  the water they can be too thick (**M** turns the mist off).
 - Far off, the map turns into coarse cells of mean colour, so distant
   views are blocky.
 - Entities (mobs, item frames, paintings, armour stands, boats, minecarts)
