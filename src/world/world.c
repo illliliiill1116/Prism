@@ -95,10 +95,14 @@ uint64_t *gocc;
 
 long chunks_loaded;
 
-/* Sky light, 4 bits per voxel, computed like Minecraft's: 15 above each
+/* Sky light, 4 bits per voxel, much like Minecraft's: 15 above each
  * column's top occluder, then spreading sideways and down through open
- * voxels, losing 1 per step. (26.2 saves SkyLight for few sections.)
- * Used only to drop caves, as BlueMap does. */
+ * voxels. (26.2 saves SkyLight for few sections.) Used only to drop caves,
+ * as BlueMap does, and so it loses 1 per SKY_STEP steps, not per step as
+ * the game's: the open air under a wide overhang (a floating island over
+ * a ravine) is more than 15 steps from the sky, and read as a cave it took
+ * the walls behind it out of the mesh. */
+#define SKY_STEP 4
 uint8_t *skyl;
 
 int cave_y = CAVE_Y;
@@ -250,19 +254,24 @@ long propagate_sky(void) {
                 PUSH(gidx(x, y, z));
             }
         }
-    long visited = 0;
+    /* breadth first from the seeds, one step's ring at a time: a voxel
+     * is reached first by its shortest way, at level 15 - steps / SKY_STEP */
+    long visited = 0, steps = 0;
+    size_t ring = qt - qh;
     while (qh != qt) {
+        if (!ring) { steps++; ring = qt - qh; }
+        ring--;
         uint32_t i = q[qh++ & (qcap - 1)];
         int x = (int)(i % GW), z = (int)((i / GW) % GW), y = (int)(i / ((size_t)GW * GW));
-        int lv = sky_at(x, y, z);
-        if (lv <= 1) continue;
+        int lv = 15 - (int)((steps + 1) / SKY_STEP);
+        if (lv < 1) break;
         for (int d = 0; d < 6; d++) {
             int nx = x + D[d][0], ny = y + D[d][1], nz = z + D[d][2];
             if (nx < 0 || nz < 0 || nx >= GW || nz >= GW || ny < 0 || ny >= grid_h) continue;
             if (ny > coltop[nz * GW + nx] || sky_block(nx, ny, nz)) continue;
             size_t j = gidx(nx, ny, nz);
-            if (((skyl[j >> 1] >> ((j & 1) * 4)) & 15) >= lv - 1) continue;
-            sky_set(j, lv - 1);
+            if ((skyl[j >> 1] >> ((j & 1) * 4)) & 15) continue;
+            sky_set(j, lv);
             PUSH(j);
             visited++;
         }
