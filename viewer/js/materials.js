@@ -38,10 +38,16 @@ export function setupMaterials(app) {
        not its frame) glow on top of the light they get, as much as the block
        light it gives off (glow, from COLOR_0's alpha) times GLOW, fading with
        the distance from the eye: half at GLOW_D blocks, a tenth at about 4.6x,
-       so a far light is a dim point, not a bright one that bloom spreads. */
+       so a far light is a dim point, not a bright one that bloom spreads.
+       Close up it fades too, to GLOW_NEAR of it at GLOW_NEAR_D blocks and
+       less, all of it from GLOW_FULL_D: a lantern a step away fills much of
+       the view, and bloom spread all those bright texels into a haze over
+       the whole frame, most of all in the dark. */
     const GLOW = 5;
-    const GLOW_D = 64;
-    const GLOW_SET = `vGlow = glow / (1.0 + pow(length(mvPosition.xyz) / ${GLOW_D.toFixed(1)}, 1.5));`;
+    const GLOW_D = 64, GLOW_NEAR = 0.3, GLOW_NEAR_D = 2, GLOW_FULL_D = 16;
+    const GLOW_SET = `{ float d = length(mvPosition.xyz);
+	vGlow = glow * mix(${GLOW_NEAR.toFixed(2)}, 1.0, smoothstep(${GLOW_NEAR_D.toFixed(1)}, ${GLOW_FULL_D.toFixed(1)}, d))
+		/ (1.0 + pow(d / ${GLOW_D.toFixed(1)}, 1.5)); }`;
     const GLOW_VERT = "attribute float glow;\nvarying float vGlow;";
     const GLOW_GLSL = `float glowMask(vec3 tex) { return smoothstep(0.2, 0.7, dot(tex, vec3(0.2126, 0.7152, 0.0722))); }`;
     const GLOW_ADD = `diffuseColor.rgb += tex * vGlow * ${GLOW.toFixed(2)} * glowMask(tex);`;
